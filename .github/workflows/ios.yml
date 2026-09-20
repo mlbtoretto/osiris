@@ -1,0 +1,41 @@
+# You do not need your own Mac. GitHub provides one.
+# One-time: gh auth login, then add Apple cert secrets (see ios/README.md).
+name: masa-ia-iphone
+on:
+  workflow_dispatch:
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npx cap sync ios
+      - name: Build IPA
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            -allowProvisioningUpdates \
+            archive -archivePath "$HOME/MASA.xcarchive"
+          xcodebuild -exportArchive -archivePath "$HOME/MASA.xcarchive" \
+            -exportPath "$HOME/export" -exportOptionsPlist - <<'PLIST' || true
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>development</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+          </dict></plist>
+          PLIST
+      - uses: actions/upload-artifact@v4
+        with:
+          name: masa-ia-ipa
+          path: ~/export/*.ipa
+          if-no-files-found: warn

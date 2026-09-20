@@ -922,24 +922,30 @@ export async function GET(request: Request) {
     await ensureRestored();
     const { searchParams } = new URL(request.url);
     const region = searchParams.get('region');
-    const lat = parseFloat(searchParams.get('lat') || '0');
-    const lng = parseFloat(searchParams.get('lng') || '0');
-    const radius = parseFloat(searchParams.get('radius') || '10');
+    const lat = parseFloat(searchParams.get('lat') || '');
+    const lng = parseFloat(searchParams.get('lng') || '');
+    const radius = parseFloat(searchParams.get('radius') || '40');
+    const hasFix = searchParams.has('lat') && searchParams.has('lng')
+      && Number.isFinite(lat) && Number.isFinite(lng);
 
     let regionsToFetch: string[];
 
-    if (region === 'all') {
+    /* Proximity wins over region=all: nearby clients need local buckets +
+       a real km filter, not the 7MB world payload. */
+    if (hasFix && region !== 'all' && !region) {
+      regionsToFetch = getRegionsForBounds(lat, lng, radius);
+    } else if (region === 'all') {
       regionsToFetch = Object.keys(REGION_FETCHERS);
     } else if (region) {
       regionsToFetch = region.split(',').filter(r => r in REGION_FETCHERS);
-    } else if (lat !== 0 || lng !== 0) {
+    } else if (hasFix) {
       regionsToFetch = getRegionsForBounds(lat, lng, radius);
     } else {
       // Default: load all regions for global coverage
       regionsToFetch = Object.keys(REGION_FETCHERS);
     }
 
-    if (regionsToFetch.length === ALL_REGIONS().length) {
+    if (regionsToFetch.length === ALL_REGIONS().length && !hasFix) {
       const ready = getPayload();
       if (ready) {
         void persistCatalogue();
@@ -953,21 +959,30 @@ export async function GET(request: Request) {
 
     const collected = await collectRegions(regionsToFetch);
 
-    const allCameras: any[] = [];
+    let allCameras: any[] = [];
     const sources: Record<string, number> = {};
     const pendingRegions = collected.pending;
 
-    for (const region of regionsToFetch) {
-      for (const cam of collected.cameras[region] ?? []) {
+    for (const regionKey of regionsToFetch) {
+      for (const cam of collected.cameras[regionKey] ?? []) {
         allCameras.push(cam);
-        sources[cam.source] = (sources[cam.source] || 0) + 1;
       }
+    }
+
+    if (hasFix) {
+      const { filterCamerasNear } = await import('@/lib/cctv-nearby');
+      const radiusKm = Number.isFinite(radius) && radius > 0 ? radius : 40;
+      allCameras = filterCamerasNear(allCameras, lat, lng, radiusKm, 400);
+    }
+
+    for (const cam of allCameras) {
+      sources[cam.source] = (sources[cam.source] || 0) + 1;
     }
 
     /* Cache what was just assembled, so the next caller is served the
        prebuilt bytes instead of paying to build them again — and so the
        catalogue reaches disk even when no payload existed to begin with. */
-    if (regionsToFetch.length === ALL_REGIONS().length) {
+    if (regionsToFetch.length === ALL_REGIONS().length && !hasFix) {
       const built = rebuildPayload();
       if (built) {
         void persistCatalogue();
@@ -985,6 +1000,7 @@ export async function GET(request: Request) {
       sources,
       regions: regionsToFetch,
       pendingRegions,
+      ...(hasFix ? { lat, lng, radiusKm: Number.isFinite(radius) && radius > 0 ? radius : 40 } : {}),
       timestamp: new Date().toISOString(),
     }, {
       headers: { 'Cache-Control': cacheControl },

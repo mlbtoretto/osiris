@@ -312,11 +312,13 @@ function Connector() {
   );
 }
 
-function CctvPreviews({ mapRef, active, onOpen }: {
+function CctvPreviews({ mapRef, active, preferFix = null, onOpen }: {
   /* The ref rather than the map: reading `.current` during render is what the
      lint rule forbids, and every use here is inside an effect anyway. */
   mapRef: React.RefObject<MlMap | null>;
   active: boolean;
+  /** When set, tiles prefer cams near this fix over pure canvas-center. */
+  preferFix?: { lat: number; lng: number } | null;
   onOpen: (cam: PreviewCamera) => void;
 }) {
   const [cams, setCams] = useState<PreviewCamera[]>([]);
@@ -340,6 +342,9 @@ function CctvPreviews({ mapRef, active, onOpen }: {
     const canvas = map.getCanvas();
     const cx = canvas.clientWidth / 2;
     const cy = canvas.clientHeight / 2;
+    const fixPt = preferFix && Number.isFinite(preferFix.lat) && Number.isFinite(preferFix.lng)
+      ? map.project([preferFix.lng, preferFix.lat])
+      : null;
 
     const seen = new Set<string>();
     const candidates: { cam: PreviewCamera; box: ReturnType<typeof layout>; d: number }[] = [];
@@ -360,6 +365,8 @@ function CctvPreviews({ mapRef, active, onOpen }: {
       seen.add(id);
 
       const pt = map.project(coords);
+      /* Prefer the operator fix when we have one; otherwise nearest screen center. */
+      const anchor = fixPt ?? { x: cx, y: cy };
       candidates.push({
         cam: {
           id,
@@ -376,11 +383,11 @@ function CctvPreviews({ mapRef, active, onOpen }: {
           media,
         },
         box: layout(pt, canvas.clientWidth, canvas.clientHeight),
-        d: (pt.x - cx) ** 2 + (pt.y - cy) ** 2,
+        d: (pt.x - anchor.x) ** 2 + (pt.y - anchor.y) ** 2,
       });
     }
 
-    /* Nearest the middle of the screen first, then drop any tile that would
+    /* Nearest the fix / middle of the screen first, then drop any tile that would
        land on top of one already taken — overlapping frames read as one
        unusable smear rather than as several cameras. */
     candidates.sort((a, b) => a.d - b.d);
@@ -403,7 +410,7 @@ function CctvPreviews({ mapRef, active, onOpen }: {
       const same = prev.length === picked.length && prev.every((p, i) => p.id === picked[i].cam.id);
       return same ? prev : picked.map(p => p.cam);
     });
-  }, [mapRef, active]);
+  }, [mapRef, active, preferFix?.lat, preferFix?.lng]);
 
   useEffect(() => {
     const map = mapRef.current;

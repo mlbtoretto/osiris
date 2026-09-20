@@ -38,3 +38,34 @@ export function loadCameraCatalog(onBatch: (cameras: CatalogCamera[]) => void, o
   void load(['all']);
   return () => { controller.abort(); clearTimeout(timer); };
 }
+
+/**
+ * Real nearby cams for a GPS / map fix — uses region buckets + haversine radius.
+ * Merges with the world catalogue; does not replace it.
+ */
+export function loadNearbyCameras(
+  fix: { lat: number; lng: number; radiusKm?: number },
+  onBatch: (cameras: CatalogCamera[]) => void,
+  onError?: () => void,
+) {
+  const controller = new AbortController();
+  const radius = Number.isFinite(fix.radiusKm) ? Number(fix.radiusKm) : 40;
+  const query = new URLSearchParams({
+    lat: String(fix.lat),
+    lng: String(fix.lng),
+    radius: String(radius),
+  });
+  void (async () => {
+    try {
+      const response = await fetch(`/api/cctv?${query}`, { signal: controller.signal, cache: 'no-store' });
+      if (!response.ok) throw new Error(`Nearby CCTV HTTP ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.cameras)) throw new Error('Invalid nearby catalogue');
+      if (controller.signal.aborted) return;
+      if (data.cameras.length) onBatch(data.cameras);
+    } catch {
+      if (!controller.signal.aborted) onError?.();
+    }
+  })();
+  return () => controller.abort();
+}

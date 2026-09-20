@@ -89,6 +89,14 @@ const LAYER_GROUPS: LayerGroupDef[] = [
     ],
   },
   {
+    label: 'SITES',
+    fullLabel: 'OPERATOR SITES',
+    icon: Database,
+    layers: [
+      { key: 'operator_sites', label: 'Corp / Farm / Agents', dataKey: 'operator_sites' },
+    ],
+  },
+  {
     label: 'SURVEIL',
     fullLabel: 'SURVEILLANCE',
     icon: Camera,

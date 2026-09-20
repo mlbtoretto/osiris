@@ -15,6 +15,7 @@ import LiveNewsPreviews, { type PreviewFeed } from '@/components/LiveNewsPreview
 import { attachTerrain, type TerrainStatus } from '@/lib/map-terrain';
 
 import { applyMapProjection } from '@/lib/map-projection';
+import { sitesToGeoJSON } from '@/lib/operator-sites';
 
 /** The catalogue fields the satellite layer and its popup actually read. */
 interface SatelliteRow {
@@ -73,6 +74,8 @@ interface OsirisMapProps {
   } | null;
   /** Live position from the browser — drawn as a pulsing dot with accuracy ring. */
   userLocation?: { lat: number; lng: number; accuracy?: number; heading?: number | null } | null;
+  /** Prefer CCTV preview tiles near this fix (GPS / home), not only canvas center. */
+  preferCctvFix?: { lat: number; lng: number } | null;
   /** Keep the camera centred on userLocation as it moves. */
   followUser?: boolean;
   /** Fired when the operator pans/zooms/rotates while follow mode is on. */
@@ -81,6 +84,11 @@ interface OsirisMapProps {
   navigating?: boolean;
   /** Corroborated endpoint airports for watched aircraft, keyed by icao24. */
   aircraftAirports?: Record<string, Array<{ icao: string; iata?: string; city?: string; lat: number; lng: number }>>;
+  /** Theatrical Atlas goddess pose on the ground. */
+  atlasPose?: { lat: number; lng: number; heading: number; from: string; to: string } | null;
+  /** Google-Earth-style ground follow locked to Atlas. */
+  followAtlas?: boolean;
+  onAtlasFollowInterrupt?: () => void;
 }
 
 function computeSolarTerminator(): [number, number][] {
@@ -105,7 +113,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, route = null, userLocation = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {} }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', terrainEnabled = false, terrainRetry = 0, terrainFocus = 0, onTerrainStatusChange, mapStyle = 'dark', sweepData, scanTargets = [], demoMode = false, theme = 'core', drawnPolygons = [], arcgisLayers = [], drawMode = null, onDrawComplete, onDrawProgress, onDrawCancel, drawCommand = null, onMapCenter, route = null, userLocation = null, preferCctvFix = null, followUser = false, onFollowInterrupt, navigating = false, aircraftAirports = {} }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -321,7 +329,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-fire', isGhost ? phantomPurple : '#E65100', 10);
       createDot(map, 'dot-cctv', cameraColor, 10);
 
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'malware-new', 'network-mesh', 'cyber-heads', 'gdelt-events', 'cf-outages', 'cf-attacks'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections', 'scan-targets', 'sdk-entities', 'sdk-links', 'malware-nodes', 'malware-new', 'network-mesh', 'cyber-heads', 'gdelt-events', 'cf-outages', 'cf-attacks', 'operator-sites'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // ── FLIGHT ROUTE VISUALIZATION SOURCES & LAYERS ──
@@ -563,6 +571,20 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         'text-field': ['get','name'], 'text-size': 9, 'text-font': ['Open Sans Regular'],
         'text-offset': [0, 2], 'text-max-width': 14, 'text-allow-overlap': false,
       }, paint: { 'text-color': ['case', ['in', 'SEISMIC RISK', ['get', 'status']], '#E65100', '#26A69A'], 'text-halo-color': '#000', 'text-halo-width': 1, 'text-opacity': 0.7 }});
+
+      map.addLayer({ id: 'operator-glow', type: 'circle', source: 'operator-sites', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 10, 6, 22, 10, 34],
+        'circle-color': ['get', 'color'], 'circle-opacity': 0.14, 'circle-blur': 0.8,
+      }});
+      map.addLayer({ id: 'operator-dots', type: 'circle', source: 'operator-sites', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 1, 5, 6, 8, 10, 11],
+        'circle-color': ['get', 'color'], 'circle-opacity': 0.95,
+        'circle-stroke-width': 1.5, 'circle-stroke-color': '#000', 'circle-stroke-opacity': 0.45,
+      }});
+      map.addLayer({ id: 'operator-label', type: 'symbol', source: 'operator-sites', minzoom: 3, layout: {
+        'text-field': ['get', 'name'], 'text-size': 10, 'text-font': ['Open Sans Regular'],
+        'text-offset': [0, 1.6], 'text-anchor': 'top',
+      }, paint: { 'text-color': ['get', 'color'], 'text-halo-color': '#000', 'text-halo-width': 1.2 }});
 
       // Satellites.
       // Every satellite is drawn once, by the custom 3D layer below, at its
@@ -980,7 +1002,8 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       'gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots',
       'balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots',
       'sdk-sea','sdk-air','sdk-intel','malware-dots','cyber-heads','gdelt-events-dots',
-      'cf-outage-dots','cf-attack-dots','flight-dots','military-dots','jet-dots','private-dots']);
+      'cf-outage-dots','cf-attack-dots','flight-dots','military-dots','jet-dots','private-dots',
+      'operator-dots']);
 
     // Satellites are picked on the GPU: the pick pass runs the same vertex
     // shader as the visible one, so the target is always exactly where the
@@ -1310,7 +1333,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Generic hover for clickables ──
-    ['conflict-icons','cctv-dots','eq-circles','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','malware-dots','cyber-heads','gdelt-events-dots','cf-outage-dots','cf-attack-dots'].forEach(layer => {
+    ['conflict-icons','cctv-dots','eq-circles','fires-heat','gdelt-dots','weather-dots','infra-dots','maritime-dots','choke-dots','news-dots','balloon-dots','rad-dots','ship-dots','sweep-device-dots','scan-targets-dots','sdk-sea','sdk-sea-glow','sdk-sea-atmo','sdk-air','sdk-air-glow','sdk-air-atmo','sdk-intel','sdk-intel-glow','sdk-intel-atmo','malware-dots','cyber-heads','gdelt-events-dots','cf-outage-dots','cf-attack-dots','operator-dots'].forEach(layer => {
       map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
     });
@@ -1456,6 +1479,28 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     });
 
     // ── Nuclear Infrastructure ──
+    map.on('click', 'operator-dots', e => {
+      if (!e.features?.length) return;
+      const p = e.features[0].properties as any;
+      const coords = (e.features[0].geometry as any).coordinates;
+      const accent = p.color || '#d4af37';
+      const files = String(p.files || '').split(' · ').filter(Boolean)
+        .slice(0, 24)
+        .map((name: string) => `<div style="font-size:9px;letter-spacing:0.08em;color:#E8E6E0;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06);">${htmlEsc(name)}</div>`)
+        .join('');
+      const more = Number(p.fileCount || 0) > 24
+        ? `<div style="font-size:8px;color:#5C5A54;margin-top:6px;">+${Number(p.fileCount) - 24} more · GET /api/operator/files</div>`
+        : '';
+      popup(coords, `<div style="${pStyle}border:1px solid ${accent}66;background:linear-gradient(180deg, ${accent}22, rgba(8,10,20,0.95));">
+        <div style="color:${accent};font-size:9px;letter-spacing:0.28em;margin-bottom:4px;">${htmlEsc((p.kind || 'site').toUpperCase())} PORTAL</div>
+        <div style="color:${accent};font-size:16px;font-weight:700;letter-spacing:0.12em;">${htmlEsc(p.name)}</div>
+        <div style="color:#9b978e;font-size:10px;margin:4px 0 10px;">${htmlEsc([p.city, p.state, p.country].filter(Boolean).join(', '))}</div>
+        <div style="font-size:10px;color:#E8E6E0;line-height:1.4;margin-bottom:10px;">${htmlEsc(p.cover || '')}</div>
+        <div style="font-size:8px;letter-spacing:0.16em;color:#5C5A54;margin-bottom:6px;">${htmlEsc(String(p.fileCount || 0))} FILES</div>
+        ${files}${more}
+      </div>`);
+    });
+
     map.on('click', 'infra-dots', e => {
       if (!e.features?.length) return;
       const p = e.features[0].properties as any;
@@ -1936,6 +1981,10 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   }, [mapReady, data.infrastructure, activeLayers.infrastructure, setGeo]);
 
   useEffect(() => {
+    setGeo('operator-sites', activeLayers.operator_sites === false ? [] : sitesToGeoJSON().features);
+  }, [mapReady, activeLayers.operator_sites, setGeo]);
+
+  useEffect(() => {
     if (!mapReady) return;
     setGeo('maritime', activeLayers.maritime && data.maritime_ports ? data.maritime_ports.map((p: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [p.lng, p.lat] }, properties: { name: p.name, country: p.country, type: p.type, volume: p.volume, fleet: p.fleet, rank: p.rank } })) : []);
     setGeo('maritime-choke', activeLayers.maritime && data.maritime_chokepoints ? data.maritime_chokepoints.map((c: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] }, properties: { name: c.name, traffic: c.traffic, risk: c.risk } })) : []);
@@ -2090,6 +2139,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
     setVis(['fires-heat'], activeLayers.fires);
     setVis(['weather-glow','weather-dots','weather-label'], activeLayers.weather);
     setVis(['infra-glow','infra-dots','infra-label'], activeLayers.infrastructure);
+    setVis(['operator-glow','operator-dots','operator-label'], activeLayers.operator_sites !== false);
     setVis(['maritime-glow','maritime-dots','maritime-label'], activeLayers.maritime);
     setVis(['choke-glow','choke-dots','choke-label'], activeLayers.maritime);
     setVis(['ship-dots','ship-label'], activeLayers.maritime);
@@ -2327,7 +2377,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
           });
         }
         if (!map.getLayer('satellite-layer')) {
-          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite-tiles', paint: { 'raster-opacity': 0.85 } }, 'day-night-fill');
+          map.addLayer({ id: 'satellite-layer', type: 'raster', source: 'satellite-tiles', paint: { 'raster-opacity': 1 } }, 'day-night-fill');
         } else {
           map.setLayoutProperty('satellite-layer', 'visibility', 'visible');
         }
@@ -2971,6 +3021,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
         <CctvPreviews
           mapRef={mapRef}
           active={!!activeLayers.cctv && !!activeLayers.cctv_previews}
+          preferFix={preferCctvFix}
           onOpen={(cam: PreviewCamera) => onEntityClick?.({ type: 'cctv', ...cam })}
         />
       )}

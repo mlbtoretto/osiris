@@ -1,13 +1,13 @@
 {
-  "name": "OSIRIS — Global Intelligence Platform",
-  "short_name": "OSIRIS",
-  "description": "Real-time global OSINT intelligence dashboard. Track 10K+ aircraft, 2K satellites, worldwide CCTV, earthquakes, wildfires, nuclear facilities, and more.",
-  "start_url": "/",
+  "name": "MASA IA",
+  "short_name": "MASA",
+  "description": "Real-time global OSINT desk on your phone.",
+  "start_url": "/?source=pwa",
   "display": "standalone",
-  "background_color": "#06060C",
-  "theme_color": "#D4AF37",
-  "orientation": "landscape-primary",
-  "categories": ["security", "intelligence", "analytics", "news"],
+  "background_color": "#07070A",
+  "theme_color": "#07070A",
+  "orientation": "any",
+  "categories": ["security", "intelligence", "navigation"],
   "icons": [
     {
       "src": "/favicon.svg",
@@ -26,6 +26,12 @@
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

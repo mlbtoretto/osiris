@@ -1,0 +1,52 @@
+{
+  "name": "OSIRIS unified desk",
+  "version": "1.1.0",
+  "recreate": {
+    "app": "cd /home/kingmlb/Projects/osiris && npm install && npm run dev",
+    "globe": "Esri World Imagery + MapLibre globe, CCTV and ADS-B on",
+    "earth": {
+      "corp": "Baghdad, Iraq",
+      "storm": "Seattle WA — T3MP3ST War Room :3333",
+      "farm": ["New York NY", "Denver CO"],
+      "agents": ["qruella", "magic", "quantum", "void", "hermes", "penligent-OR", "mcp-hydra-NC"],
+      "archives": ["CA", "TX", "FL", "IL", "GA", "AZ", "NV", "MA", "DC", "MI", "LOCAL", "ALL"]
+    },
+    "inventory": {
+      "source": "src/lib/file-inventory.ts",
+      "api": "GET /api/operator/files",
+      "vault": "vault-all holds literally every inventoried path"
+    },
+    "planets": ["earth", "ares", "styx", "iris", "nemesis"],
+    "layers": ["surface", "dns", "identity", "social", "code", "iot", "dark", "archive", "geo", "crypto", "msg", "threat", "link", "media"],
+    "projects": [
+      "/home/kingmlb/Projects/osiris",
+      "/home/kingmlb/Projects/T3MP3ST",
+      "/home/kingmlb/Projects/agent-zero",
+      "/home/kingmlb/Projects/hexstrike-ai",
+      "/home/kingmlb/Projects/mcp-hydra",
+      "/home/kingmlb/Projects/penligent",
+      "/home/kingmlb/Projects/robin",
+      "/home/kingmlb/Projects/lab"
+    ],
+    "robin": "/home/kingmlb/Projects/robin",
+    "t3mp3st": "http://127.0.0.1:3333/ui/",
+    "racks": ["maltego", "spiderfoot", "exiftool", "shadowdragon", "shodan", "osint-industries", "robin", "censys", "wayback", "t3mp3st"],
+    "notes": "data/forensic-notes.json",
+    "traces": "data/langsmith-local.jsonl",
+    "env": ["GEMINI_API_KEY", "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY", "MASA_MAX_TOKENS", "OLLAMA_MAX_TOKENS"],
+    "inscription": {
+      "callsign": "HORUS-1",
+      "hull": "NASA Valkyrie / Robonaut",
+      "swarm": 1000,
+      "voice": 1,
+      "vision": 1
+    },
+    "chrome": "POST /api/chrome/devtools { action: launch | navigate | eval | screenshot | dom | network | console }",
+    "life": "/home/kingmlb/.openclaw/workspace/LIFE.md",
+    "pack": "bash /home/kingmlb/Projects/osiris/scripts/pack-servers.sh",
+    "servers": {
+      "this": "kingmlb-1 100.117.67.58",
+      "linux": ["kingmlb 100.94.150.2", "mlpb 100.125.221.98", "omarchy 100.122.120.37"]
+    }
+  }
+}

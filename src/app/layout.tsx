@@ -3,15 +3,19 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import "./globals.css";
 
 const SITE_URL = "https://osirisai.live";
-const SITE_NAME = "OSIRIS";
-const SITE_TITLE = "OSIRIS — Open Source Intelligence Platform | Live Flight Tracking, CCTV, OSINT Tools & More";
+const SITE_NAME = "MASA IA";
+const SITE_TITLE = "MASA IA — Intelligence Platform | Live Flight Tracking, CCTV, OSINT Tools & More";
 const SITE_DESCRIPTION = "The open-source Palantir alternative. Track live aircraft, satellites, and worldwide CCTV cameras on a 3D globe. Run Nmap scans, DNS lookups, WHOIS queries, SSL cert analysis & threat intelligence — all from your browser. 20+ data sources including live earthquake, wildfire, cyber threat and conflict feeds, plus mapped reference data such as nuclear facilities. Free & open source.";
 
 export const viewport: Viewport = {
-  themeColor: "#D4AF37",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#07070A" },
+    { color: "#07070A" },
+  ],
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
+  viewportFit: "cover",
   colorScheme: "dark",
 };
 
@@ -19,7 +23,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: SITE_TITLE,
-    template: "%s | OSIRIS Intelligence",
+    template: "%s | MASA IA",
   },
   description: SITE_DESCRIPTION,
   keywords: [
@@ -91,7 +95,7 @@ export const metadata: Metadata = {
     canonical: SITE_URL,
   },
   openGraph: {
-    title: "OSIRIS — The Open-Source Palantir Alternative | Live Flights, CCTV, Satellites & OSINT Tools",
+    title: "MASA IA — Live Flights, CCTV, Satellites & OSINT",
     description: "Track 10K+ aircraft, 2K satellites & worldwide CCTV on a 3D globe. Run Nmap, DNS, WHOIS & threat intel scans from your browser. 20+ live intelligence feeds. Free. Open source.",
     type: "website",
     siteName: SITE_NAME,
@@ -102,14 +106,14 @@ export const metadata: Metadata = {
         url: `${SITE_URL}/og-image.png`,
         width: 1200,
         height: 630,
-        alt: "OSIRIS — Open Source Intelligence Platform with Live Tracking & OSINT Tools",
+        alt: "MASA IA — Intelligence platform with live tracking and OSINT tools",
         type: "image/png",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "🛰️ OSIRIS — Open Source Palantir Alternative | Live Tracking + OSINT Tools",
+    title: "MASA IA — Live Tracking + OSINT",
     description: "Track 10K+ flights, satellites & CCTV worldwide. Run Nmap, DNS, WHOIS scans from your browser. 20+ live intel feeds. Free & open source.",
     creator: "@simplifaisoul",
     site: "@simplifaisoul",
@@ -120,10 +124,11 @@ export const metadata: Metadata = {
   other: {
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
-    "apple-mobile-web-app-title": "OSIRIS",
+    "apple-mobile-web-app-title": "MASA IA",
     "mobile-web-app-capable": "yes",
-    "msapplication-TileColor": "#06060C",
+    "msapplication-TileColor": "#07070A",
     "msapplication-config": "none",
+    "format-detection": "telephone=no",
   },
 };
 
@@ -131,8 +136,8 @@ export const metadata: Metadata = {
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
-  name: "OSIRIS — OSINT Toolkit & Intelligence Platform",
-  alternateName: ["OSIRIS", "OsirisAI", "Osiris OSINT"],
+  name: "MASA IA",
+  alternateName: ["MASA IA", "MASA"],
   url: SITE_URL,
   description: SITE_DESCRIPTION,
   applicationCategory: "SecurityApplication",
@@ -198,7 +203,7 @@ export default function RootLayout({
 
       </head>
       <body className="antialiased">
-        <ErrorBoundary name="OSIRIS Core">
+        <ErrorBoundary name="MASA IA Core">
           {children}
         </ErrorBoundary>
       </body>

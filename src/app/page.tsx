@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, ShoppingBag } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
-import { loadCameraCatalog, mergeCameraCatalog } from '@/lib/camera-catalog';
+import { loadCameraCatalog, loadNearbyCameras, mergeCameraCatalog } from '@/lib/camera-catalog';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import ScmPanel from '@/components/ScmPanel';
@@ -16,6 +16,14 @@ import FlightWatchPanel, { type WatchedFlight, type FlightTelemetry, type Aircra
 import type { NavProgress } from '@/lib/navigation';
 import type { LiveDetection } from '@/lib/malware-intel';
 import ScaleBar from '@/components/ScaleBar';
+import LocalWeatherHud from '@/components/LocalWeatherHud';
+import type { LocalWeather } from '@/lib/local-weather';
+import PortalDropdown from '@/components/PortalDropdown';
+import PlanetRail from '@/components/PlanetRail';
+import HiddenPlanetStage from '@/components/HiddenPlanetStage';
+import IosHomeBanner from '@/components/IosHomeBanner';
+import { nextPlanet, type PlanetId } from '@/lib/planets';
+import type { OperatorSite } from '@/lib/operator-sites';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { applySettings, loadSavedSettings } from '@/lib/style-tokens';
 import SharePanel from '@/components/SharePanel';
@@ -30,6 +38,8 @@ const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
 const CameraViewer = dynamic(() => import('@/components/CameraViewer'));
 const OsintPanel = dynamic(() => import('@/components/OsintPanel'));
+const UnifiedDesk = dynamic(() => import('@/components/UnifiedDesk'), { ssr: false });
+const ThemeSong = dynamic(() => import('@/components/ThemeSong'), { ssr: false });
 const DrawingToolbar = dynamic(() => import('@/components/DrawingToolbar'), { ssr: false });
 const DrawHud = dynamic(() => import('@/components/DrawHud'), { ssr: false });
 // The measurement helpers are pure functions — importing them directly keeps
@@ -158,6 +168,7 @@ export default function Dashboard() {
   const [showSpaceCam, setShowSpaceCam] = useState(false);
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showIntel, setShowIntel] = useState(false);
+  const [showUnified, setShowUnified] = useState(false);
   const [showDrawing, setShowDrawing] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode | null>(null);
   const [drawProgress, setDrawProgress] = useState<DrawProgress | null>(null);
@@ -254,17 +265,45 @@ export default function Dashboard() {
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [navSession]);
+
+  /* iPhone / mobile: keep a live fix while MASA is open so agents, weather,
+     and nearby CCTV travel with the operator under Tailscale. */
+  useEffect(() => {
+    if (navSession) return; // nav watch already owns the stream
+    if (!isMobile) return;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        setLiveLocation({
+          lat,
+          lng,
+          accuracy: pos.coords.accuracy,
+          heading: pos.coords.heading,
+        });
+        setHomeFix(prev => ({ lat, lng, city: prev?.city }));
+      },
+      () => { /* Safari needs HTTPS + Allow; Tailscale URL covers HTTPS */ },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [isMobile, navSession]);
   const [showRemote, setShowRemote] = useState(false);
   const [showArcGIS, setShowArcGIS] = useState(false);
   const [arcgisLayers, setArcgisLayers] = useState<Array<{ id: string; title: string; url: string; geojson: any; color: string; visible: boolean; opacity: number }>>([]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'remote'|null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'remote'|'horus'|null>(null);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [terrainFocus, setTerrainFocus] = useState(0);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>('idle');
   const [terrainRetry, setTerrainRetry] = useState(0);
-  const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('dark');
+  const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('satellite');
+  const [homeFix, setHomeFix] = useState<{ lat: number; lng: number; city?: string } | null>(null);
+  const [localWeather, setLocalWeather] = useState<LocalWeather | null>(null);
+  const [planet, setPlanet] = useState<PlanetId>('earth');
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [drawnPolygons, setDrawnPolygons] = useState<DrawnShape[]>([]);
@@ -290,12 +329,13 @@ export default function Dashboard() {
 
   // ── DEFAULT: Most layers OFF — fast initial load ──
   const [activeLayers, setActiveLayers] = useState({
-    flights: false,
+    flights: true,
+    operator_sites: true,
     private: false,
     jets: false,
     military: false,
     maritime: true,
-    satellites: false,
+    satellites: true,
     sat_comms: false,
     sat_military: false,
     sat_navigation: false,
@@ -308,7 +348,7 @@ export default function Dashboard() {
     live_news: true,
     earthquakes: true,
     fires: false,
-    weather: false,
+    weather: true,
     radiation: false,
     infrastructure: false,
     global_incidents: true,
@@ -344,7 +384,9 @@ export default function Dashboard() {
 
   // Splash screen
   useEffect(() => {
-    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
+    const mobile = window.innerWidth < 768 || (window.innerHeight < 500 && window.innerWidth < 1024);
+    if (mobile) setMapProjection('mercator');
+    const splashTimer = setTimeout(() => setShowSplash(false), mobile ? 280 : 520);
     return () => clearTimeout(splashTimer);
   }, []);
 
@@ -384,11 +426,28 @@ export default function Dashboard() {
         .then(geo => {
           if (!autoLocateCancelled.current && !geoController.signal.aborted && geo.status === 'success' &&
               Number.isFinite(geo.lat) && Number.isFinite(geo.lon) && Math.abs(geo.lat) <= 90 && Math.abs(geo.lon) <= 180) {
+            setHomeFix({ lat: geo.lat, lng: geo.lon, city: geo.city || geo.regionName });
             setFlyToLocation({ lat: geo.lat, lng: geo.lon, zoom: 8, ts: Date.now() });
           }
         })
         .catch(() => { /* silent — keep default global view */ });
     }, 3000);
+
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          setHomeFix(prev => ({ lat, lng, city: prev?.city }));
+          if (!autoLocateCancelled.current) {
+            setFlyToLocation({ lat, lng, zoom: 10, ts: Date.now() });
+          }
+        },
+        () => { /* keep IP geolocation */ },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
+      );
+    }
 
     return () => {
       clearTimeout(geoTimer); geoController.abort();
@@ -396,6 +455,20 @@ export default function Dashboard() {
       window.removeEventListener('keydown', cancelAutoLocate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!homeFix) return;
+    let cancelled = false;
+    const load = () => {
+      fetch(`/api/weather/local?lat=${homeFix.lat}&lng=${homeFix.lng}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(w => { if (!cancelled && w && w.condition) setLocalWeather(w); })
+        .catch(() => { /* HUD stays on last good reading */ });
+    };
+    load();
+    const iv = setInterval(load, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [homeFix]);
 
   // URL state: persist active layers only (lat/lon comes from IP geolocation on each load)
   const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -437,6 +510,8 @@ export default function Dashboard() {
         setActiveLayers(prev => ({ ...prev, terrain_elevation: false, terrain_3d: false }));
         setMapProjection(p => p === 'globe' ? 'mercator' : 'globe');
       }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); setPlanet(p => nextPlanet(p, -1)); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); setPlanet(p => nextPlanet(p, 1)); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         setShowDesktopSearch(true); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false);
@@ -648,6 +723,25 @@ export default function Dashboard() {
       setBackendStatus('connected');
     }, () => console.warn('[OSIRIS] Camera catalogue load failed; bounded retry scheduled'));
   }, [activeLayers.cctv]);
+
+  /* Real nearby: once we know where the operator is (GPS / home / map), pull
+     regional cams filtered by km — merges into the world catalogue. */
+  useEffect(() => {
+    if (!activeLayers.cctv) return;
+    const fix = liveLocation ?? homeFix ?? (mapCenter ? { lat: mapCenter.lat, lng: mapCenter.lng } : null);
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lng)) return;
+    return loadNearbyCameras(
+      { lat: fix.lat, lng: fix.lng, radiusKm: 50 },
+      cameras => {
+        dataRef.current = {
+          ...dataRef.current,
+          cameras: mergeCameraCatalog(dataRef.current.cameras ?? [], cameras),
+        };
+        setDataVersion(value => value + 1);
+      },
+      () => console.warn('[OSIRIS] Nearby CCTV load failed'),
+    );
+  }, [activeLayers.cctv, liveLocation?.lat, liveLocation?.lng, homeFix?.lat, homeFix?.lng, mapCenter?.lat, mapCenter?.lng]);
 
   useEffect(() => {
 
@@ -1040,7 +1134,7 @@ export default function Dashboard() {
 
             {/* ── OSIRIS title — letter-by-letter stagger ── */}
             <div className="flex items-center gap-[2px] mb-3 z-[2]">
-              {'OSIRIS'.split('').map((letter, i) => (
+              {'MASA IA'.split('').map((letter, i) => (
                 <motion.span
                   key={i}
                   initial={{ opacity: 0, y: 20, filter: 'blur(8px)' }}
@@ -1138,8 +1232,28 @@ export default function Dashboard() {
 
 
 
-      {/* ── MAP ── */}
+      <div className="masa-frame" aria-hidden>
+        <span className="masa-frame-mark">MASA IA</span>
+        <span className="masa-frame-bl" />
+        <span className="masa-frame-br" />
+      </div>
+      {/* ── MAP / HIDDEN PLANETS ── */}
       <ErrorBoundary name="Map">
+        <AnimatePresence mode="wait">
+          {planet !== 'earth' ? (
+            <motion.div
+              key={planet}
+              className="absolute inset-0 z-[1]"
+              initial={{ x: 80, opacity: 0, scale: 0.92 }}
+              animate={{ x: 0, opacity: 1, scale: 1 }}
+              exit={{ x: -80, opacity: 0, scale: 0.92 }}
+              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <HiddenPlanetStage planetId={planet} />
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
+        <div className={planet === 'earth' ? 'contents' : 'hidden'}>
         <OsirisMap 
           key={osirisTheme}
           data={data} 
@@ -1167,6 +1281,7 @@ export default function Dashboard() {
               ? { lat: navProgress.snapped[1], lng: navProgress.snapped[0], accuracy: liveLocation?.accuracy, heading: liveLocation?.heading }
               : liveLocation
           }
+          preferCctvFix={liveLocation ?? homeFix ?? (mapCenter ? { lat: mapCenter.lat, lng: mapCenter.lng } : null)}
           followUser={followUser}
           onFollowInterrupt={() => setFollowUser(false)}
           navigating={Boolean(navSession)}
@@ -1178,6 +1293,7 @@ export default function Dashboard() {
           drawnPolygons={drawnPolygons}
           aircraftAirports={aircraftAirports}
         />
+        </div>
       </ErrorBoundary>
 
       {/* ── DIRECTIONS — opens beside the right-hand tool rail ── */}
@@ -1276,6 +1392,19 @@ export default function Dashboard() {
         </div>
 
 
+        <PlanetRail planet={planet} onPlanet={setPlanet} />
+        {planet === 'earth' && (
+          <PortalDropdown onPortal={(site: OperatorSite) => {
+            setPlanet('earth');
+            setFlyToLocation({ lat: site.lat, lng: site.lng, zoom: 11, ts: Date.now() });
+          }} />
+        )}
+        {localWeather && planet === 'earth' && (
+          <div className="pointer-events-none">
+            <LocalWeatherHud weather={localWeather} city={homeFix?.city} />
+          </div>
+        )}
+
         {/* Scale Bar */}
         {!isMobile && (
           <div className="pl-0.5">
@@ -1293,8 +1422,11 @@ export default function Dashboard() {
             <path d="m140.86,465.53c-6.7333,0-8.7137-5.4462-12.181-25.899-2.4479-14.774-7.1068-28.463-10.502-43.043-3.0219-13.117-5.6425-20.332-9.6694-26.618-6.5526-10.229-6.3011-20.921,0.71691-30.481,6.33-8.6232,6.827-11.121,6.5471-32.901-0.13783-10.725-0.56403-21.286-0.94711-23.468-0.88077-5.0179-4.6148-7.6923-13.904-9.9586-8.4827-2.0695-16.525-2.2933-41.967-1.1681-18.144,0.80245-20.457,0.72323-22.75-0.77901-5.627-3.687-2.9527-8.8405,12.261-23.626,15.69-15.249,23.876-24.688,38.811-44.75,26.839-36.053,30.927-40.83,57.501-49.189,19.575-6.1582,26.691-9.0119,62.031-10.06,24.654-0.7309,38.767,2.5963,45.357,3.3466,25.219,2.8716,66.247,14.877,91.933,26.083,13.581,5.9249,14.042,6.1723,30.115,16.152,11.981,7.4391,18.733,10.459,35.44,15.034,34.886,9.553,56.753,7.7583,92,10.378,9.2579,0.68808,49.298,3.5149,74.5,4.4784,30.689,1.1732,35.835-2.0376,38.423,0.54994,2.0315,2.0315,0.5636,8.1815,0.6024,14.306,0.0237,3.7378-0.18399,7.6642-0.48569,11.602-8.1923-1.424-8.0353-1.3676-26.54-2.9165-1.6808-0.14069-16.718-1.6695-44.5-4.1726-11.867-1.0692-70.326-2.8448-105.5-3.9248-16.997-0.52189-34.357-4.7228-51-1.2347-5.7624,1.2076,2.387-1.1161-16,7.4812-36.313,14.051-55.853,23.79-104.5,32.83-30.774,4.5201-33.208,4.9745-36.376,7.2909-1.7456,1.2764-1.662,1.6171,1.6767,6.8363,3.5642,5.5717,14.275,15.81,29.699,28.389,51.619,43.564,115.05,77.431,162.89,98.598,22.221,9.5122,37.55,14.655,50.108,16.811,61.892,13.654,134.26-9.4938,136.11-56.959,0.0489-1.256,0.49928-6.001-0.1398-12.079-0.44539-4.2357-0.89625-7.3216-2.2932-11.095-3.9795-10.75-12.413-20.407-28.672-21.755-11.746,0.022-20.375,6.1561-23.95,16.17-4.5622,12.78,1.3185,27.071,14.023,29.565,6.6403,1.3038,11.222-0.5256,14.271-4.4679,3.3424-4.3221,3.72-12.026,1.3559-15.634-2.2757-3.4732-7.2459-5.2754-10.824-3.9248-3.6125,1.3636-4.9933,0.36555-0.6538-3.1839,0.38036-0.24867,0.77844-0.4586,1.191-0.63136,6.6675-2.7918,17.127,4.1226,17.913,14.135,0.7119,11.495-7.7045,20.279-19.249,20.94-6.5659,0.37574-14.594-1.9665-20.026-7.8035-13.425-14.428-9.1712-34.885,2.9586-45.762,4.6131-4.1366,7.7535-6.0583,14.065-7.4773,19.37-4.3554,37.69,4.5134,45.528,24.301,3.5645,8.9992,3.7675,16.201,3.8515,23.221,0.70438,58.895-65.742,87.202-131.95,82.517-28.009-2.4123-46.229-6.8095-80.495-20.915-36.58-12.09-143.44-68.32-207.96-120.33-18.846-15.317-30.511-22.813-33.055-21.24-0.61585,0.38062-0.98989,11.992-0.99221,30.802-0.004,28.758-0.1019,30.352-2.0717,33.583-3.2793,5.3791-4.935,17.725-5.9822,44.608-1.6327,41.914-2.675,60.915-3.4439,62.778-1.3963,3.383-7.0306,4.6642-13.289,4.6642zm221.62-252.27c0.41803-2.1707-4.6044-8.6243-11.231-13.08-10.396-6.9893-22.385-11.512-34.092-15.96-71.934-23.518-145.08-20.065-174.03-4.962-10.593,5.1512-14.126,7.777-22.813,15.582-4.1291,3.7102-9.5939,9.7305-12.144,13.379-5.133,7.3428-10.014,13.339-19.014,23.362-9.3026,10.359-14.5,16.774-14.5,17.897,0,1.5721,7.8962,3.1488,17.5,3.5809,81.15,10.292,230.44,14.198,270.32-39.799zm224.18-69.351c-16.558-0.50003-42.467-2.0158-63.5-4.8954-19.525-2.6732-39.047-6.067-58-11.467-17.982-5.123-35.124-12.85-52.5-19.754-7.7243-3.0694-15.32-6.4533-23-9.6318-8.319-3.4429-16.53-7.1723-25-10.224-15.523-5.5928-30.986-11.946-47.239-14.789-41.988-7.3464-85.261-8.7793-127.76-5.4986-23.554,1.8182-46.695,7.7124-69.5,13.878-17.863,4.8293-35.019,11.972-52.5,18.041-5.069,1.761-10.039,6.841-15.177,5.321-5.396-1.6-10.73-7.749-10.317-13.361,0.434-5.884,7.835-9.014,12.753-12.272,16.823-11.146,36.498-17.485,55.661-23.803,19.219-6.3349,38.923-12.127,59.072-14.001,54.326-5.0532,110.09-3.4301,163.5,7.7269,28.29,5.9098,53.945,20.759,81,30.92,31.437,11.806,61.76,27.444,94.5,34.909,33.045,7.534,83.745,9.6292,101.22,9.5911,6.5425-0.0143,6.7685,0.0708,8.3595,3.1475,1.8515,3.5805,3.1256,14.296,1.7926,15.077-1.3395,0.78418-21.593,1.4453-33.376,1.0894z" />
           </svg>
           <div className="flex flex-col items-start gap-0.5">
-            <h1 className="text-lg md:text-xl font-bold tracking-[0.4em] text-[#D4AF37] font-mono">OSIRIS</h1>
+            <h1 className="text-lg md:text-xl font-bold tracking-[0.4em] text-[#D4AF37] font-mono">MASA IA</h1>
             <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]">OPEN SOURCE INTELLIGENCE</span>
+          </div>
+          <div className="pointer-events-auto ml-2">
+            <ThemeSong />
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1.5 pl-[44px] min-w-0 pr-4">
@@ -1372,7 +1504,20 @@ export default function Dashboard() {
       {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
       {!isMobile && <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
         <div className="relative group">
-          <button onClick={() => { setShowIntel(!showIntel); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showIntel ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`} title="OSINT Recon — IP lookup, network sweep, geolocation" aria-label="OSINT Recon" aria-expanded={showIntel}>
+          <button onClick={() => { setShowUnified(v => !v); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showUnified ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Unified desk — LangSmith, graph, voice, vision, forensics" aria-label="Unified desk" aria-expanded={showUnified}>
+            <Network className={`w-4 h-4 ${showUnified ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">UNIFIED</span>
+          <AnimatePresence>
+            {showUnified && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2">
+                <UnifiedDesk planet={planet} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="relative group">
+          <button onClick={() => { setShowIntel(!showIntel); setShowUnified(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showIntel ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`} title="OSINT Recon — IP lookup, network sweep, geolocation" aria-label="OSINT Recon" aria-expanded={showIntel}>
             <Radar className={`w-4 h-4 ${showIntel ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
             {showIntel && (
               <span
@@ -1677,6 +1822,7 @@ export default function Dashboard() {
                 // phone could not open it at all. It sits next to SEARCH
                 // because both answer "take me somewhere".
                 { id: 'route' as const, icon: Route, label: 'ROUTE' },
+                { id: 'horus' as const, icon: Network, label: 'HORUS' },
                 { id: 'remote' as const, icon: Bluetooth, label: 'REMOTE' },
               ].map(tab => {
                 // Routing opens the planner at the top of the screen rather than
@@ -1722,13 +1868,13 @@ export default function Dashboard() {
                 initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 30, stiffness: 300 }}
                 className="fixed bottom-[52px] left-0 right-0 z-[400] glass-panel rounded-b-none overflow-y-auto styled-scrollbar"
-                style={{ maxHeight: 'min(55vh, calc(100dvh - 100px))', paddingBottom: 'env(safe-area-inset-bottom, 4px)' }}
+                style={{ maxHeight: mobilePanel === 'horus' ? 'min(78vh, calc(100dvh - 80px))' : 'min(55vh, calc(100dvh - 100px))', paddingBottom: 'env(safe-area-inset-bottom, 4px)' }}
               >
                 <div className="mobile-drawer-handle" />
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[10px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : mobilePanel === 'remote' ? 'WORLD REMOTE' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'MASA RECON' : mobilePanel === 'horus' ? 'MASA IA LIVE' : mobilePanel === 'remote' ? 'WORLD REMOTE' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
@@ -1760,6 +1906,11 @@ export default function Dashboard() {
                   {mobilePanel === 'recon' && (
                     <div className="space-y-2">
                       <OsintPanel isOpen={true} onClose={() => setMobilePanel(null)} isMobile={true} onSweepVisualize={setSweepData} />
+                    </div>
+                  )}
+                  {mobilePanel === 'horus' && (
+                    <div className="space-y-2">
+                      <UnifiedDesk planet={planet} />
                     </div>
                   )}
                   {mobilePanel === 'remote' && (
