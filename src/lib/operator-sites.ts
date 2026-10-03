@@ -43,6 +43,11 @@ function pack(ids: string[]): OperatorFile[] {
 
 /** Every site. Archive vault holds literally ALL_FILES so nothing is orphaned. */
 export const OPERATOR_SITES: OperatorSite[] = [
+
+/** Reverse lookup: file.id -> site that owns it (first match). */
+export function siteForFile(fileId: string): OperatorSite | undefined {
+  return OPERATOR_SITES.find(site => site.files.some(f => f.id === fileId));
+}
   {
     id: 'corp-iraq',
     name: 'MASA IA CORP',
@@ -54,7 +59,7 @@ export const OPERATOR_SITES: OperatorSite[] = [
     lng: 44.366067,
     cover: 'Main corporation. Globe core and agent command.',
     files: pack([
-      'proj-osiris', 'vend-earth', 'vend-gev', 'vend-skills', 'vend-signal',
+      'proj-masa', 'vend-earth', 'vend-gev', 'vend-skills', 'vend-signal',
       'data-forensic', 'data-unified', 'data-patterns', 'url-masa',
     ]),
   },
@@ -369,6 +374,48 @@ export function inventoryCoverage(): { total: number; wired: number; missing: st
   }
   const missing = allFileIds().filter(id => !wired.has(id));
   return { total: ALL_FILES.length, wired: wired.size, missing };
+}
+
+/** First real site that holds this file. The all-files vault is the duplicate. */
+export function siteForFile(id: string): OperatorSite | undefined {
+  return OPERATOR_SITES.find(site => site.id !== 'vault-all' && site.files.some(file => file.id === id));
+}
+
+/** One pin per inventory file, ringed around its site so the file sits on the map. */
+export function filesToGeoJSON() {
+  const seen = new Set<string>();
+  const features: Array<{
+    type: 'Feature';
+    geometry: { type: 'Point'; coordinates: [number, number] };
+    properties: { id: string; name: string; site: string; color: string; href: string };
+  }> = [];
+  for (const site of OPERATOR_SITES) {
+    if (site.id === 'vault-all') continue;
+    const files = site.files.filter(file => {
+      const key = file.id || file.path;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    files.forEach((file, index) => {
+      const angle = (index / Math.max(files.length, 1)) * Math.PI * 2;
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [site.lng + Math.cos(angle) * 0.28, site.lat + Math.sin(angle) * 0.28],
+        },
+        properties: {
+          id: file.id || file.path,
+          name: file.name,
+          site: site.name,
+          color: KIND_COLOR[site.kind],
+          href: file.href || '',
+        },
+      });
+    });
+  }
+  return { type: 'FeatureCollection' as const, features };
 }
 
 export function sitesToGeoJSON() {
