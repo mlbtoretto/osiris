@@ -1,18 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 
-const SHARED_BRAIN = '/home/kingmlb/.masa/SHARED.md';
-const OPENCLAW_MEMORY = '/home/kingmlb/.openclaw/workspace/MEMORY.md';
-const HERMES_MEMORY = '/home/kingmlb/.hermes/profiles/robonaut/memories/MEMORY.md';
-const FORENSIC_NOTES = '/home/kingmlb/Projects/osiris/data/forensic-notes.json';
-const INTEGRATIONS = '/home/kingmlb/Projects/osiris/data/masa-integrations.json';
-const LIFE_MD = '/home/kingmlb/.openclaw/workspace/LIFE.md';
-const SOUL_MD = '/home/kingmlb/.openclaw/workspace/SOUL.md';
-const USER_MD = '/home/kingmlb/.openclaw/workspace/USER.md';
-const DREAMS_MD = '/home/kingmlb/.openclaw/workspace/DREAMS.md';
-const FORENSICS_MD = '/home/kingmlb/.openclaw/workspace/FORENSICS.md';
-const AGENTS_MD = '/home/kingmlb/.openclaw/workspace/AGENTS.md';
-const SHARED_SYMLINK = '/home/kingmlb/.openclaw/workspace/SHARED.md';
+const HOME = os.homedir();
+const SHARED_BRAIN = path.join(HOME, '.masa/SHARED.md');
+const OPENCLAW_MEMORY = path.join(HOME, '.openclaw/workspace/MEMORY.md');
+const HERMES_MEMORY = path.join(HOME, '.hermes/profiles/robonaut/memories/MEMORY.md');
+const FORENSIC_NOTES = path.join(process.cwd(), 'data/forensic-notes.json');
+const INTEGRATIONS = path.join(process.cwd(), 'data/masa-integrations.json');
+const LIFE_MD = path.join(HOME, '.openclaw/workspace/LIFE.md');
+const SOUL_MD = path.join(HOME, '.openclaw/workspace/SOUL.md');
+const USER_MD = path.join(HOME, '.openclaw/workspace/USER.md');
+const DREAMS_MD = path.join(HOME, '.openclaw/workspace/DREAMS.md');
+const FORENSICS_MD = path.join(HOME, '.openclaw/workspace/FORENSICS.md');
+const AGENTS_MD = path.join(HOME, '.openclaw/workspace/AGENTS.md');
+const SHARED_SYMLINK = path.join(HOME, '.openclaw/workspace/SHARED.md');
 
 export type MemoryLayer = {
   id: string;
