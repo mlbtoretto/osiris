@@ -434,8 +434,3 @@ export function sitesToGeoJSON() {
     })),
   };
 }
-
-/** Reverse lookup: file.id -> site that owns it (first match). */
-export function siteForFile(fileId: string): OperatorSite | undefined {
-  return OPERATOR_SITES.find(site => site.files.some(f => f.id === fileId));
-}
