@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -16,6 +16,10 @@ const FORENSICS_MD = path.join(HOME, '.openclaw/workspace/FORENSICS.md');
 const AGENTS_MD = path.join(HOME, '.openclaw/workspace/AGENTS.md');
 const SHARED_SYMLINK = path.join(HOME, '.openclaw/workspace/SHARED.md');
 
+/** Permanent append-only human memory log — never deleted, never rotated. */
+const HUMAN_MEMORY_LOG = path.join(HOME, '.masa/human-memory.log');
+const HUMAN_MEMORY_INDEX = path.join(HOME, '.masa/human-memory-index.json');
+
 export type MemoryLayer = {
   id: string;
   name: string;
@@ -24,7 +28,7 @@ export type MemoryLayer = {
   content?: string;
   size?: number;
   mtime?: string;
-  kind: 'shared-brain' | 'openclaw' | 'hermes' | 'forensic' | 'integrations' | 'covenant' | 'identity' | 'agent-registry';
+  kind: 'shared-brain' | 'openclaw' | 'hermes' | 'forensic' | 'integrations' | 'covenant' | 'identity' | 'agent-registry' | 'human-memory';
 };
 
 export type UnifiedMemory = {
@@ -35,6 +39,16 @@ export type UnifiedMemory = {
     presentLayers: number;
     totalChars: number;
   };
+};
+
+export type HumanMemoryEntry = {
+  id: string;
+  ts: string;
+  type: 'directive' | 'observation' | 'decision' | 'refusal' | 'preference' | 'correction' | 'fact' | 'workflow';
+  content: string;
+  source: 'operator' | 'agent' | 'system';
+  tags: string[];
+  sessionId?: string;
 };
 
 async function readLayer(id: string, name: string, filePath: string, kind: MemoryLayer['kind']): Promise<MemoryLayer> {
@@ -60,6 +74,7 @@ export async function getUnifiedMemory(): Promise<UnifiedMemory> {
     readLayer('dreams', 'DREAMS.md — Future Aspirations', DREAMS_MD, 'covenant'),
     readLayer('forensics', 'FORENSICS.md — Forensic Observations', FORENSICS_MD, 'forensic'),
     readLayer('agent-registry', 'AGENTS.md — Swarm Agent Registry', AGENTS_MD, 'agent-registry'),
+    readLayer('human-memory', 'Human Memory Log (permanent, append-only)', HUMAN_MEMORY_LOG, 'human-memory'),
   ]);
 
   const present = layers.filter(l => l.exists);
@@ -78,6 +93,103 @@ export async function getUnifiedMemory(): Promise<UnifiedMemory> {
   };
 }
 
+/** Initialize human memory log (append-only, never rotated). */
+async function ensureHumanMemoryLog() {
+  await mkdir(path.dirname(HUMAN_MEMORY_LOG), { recursive: true });
+  await mkdir(path.dirname(HUMAN_MEMORY_INDEX), { recursive: true });
+  try {
+    await readFile(HUMAN_MEMORY_LOG, 'utf-8');
+  } catch {
+    await writeFile(HUMAN_MEMORY_LOG, '# HUMAN MEMORY LOG — Permanent, append-only, never forgotten\n# Format: JSONL — one entry per line\n# Created: ' + new Date().toISOString() + '\n');
+  }
+  try {
+    await readFile(HUMAN_MEMORY_INDEX, 'utf-8');
+  } catch {
+    await writeFile(HUMAN_MEMORY_INDEX, JSON.stringify({ entries: [], updatedAt: new Date().toISOString() }, null, 2));
+  }
+}
+
+/** Append a human memory entry — permanent, immutable, indexed. */
+export async function rememberHuman(entry: Omit<HumanMemoryEntry, 'id' | 'ts'>): Promise<HumanMemoryEntry> {
+  await ensureHumanMemoryLog();
+  
+  const fullEntry: HumanMemoryEntry = {
+    ...entry,
+    id: `hmem_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    ts: new Date().toISOString(),
+  };
+  
+  // Append to log (immutable)
+  await appendFile(HUMAN_MEMORY_LOG, JSON.stringify(fullEntry) + '\n');
+  
+  // Update index
+  const indexRaw = await readFile(HUMAN_MEMORY_INDEX, 'utf-8');
+  const index = JSON.parse(indexRaw);
+  index.entries.push({ id: fullEntry.id, ts: fullEntry.ts, type: fullEntry.type, tags: fullEntry.tags });
+  index.updatedAt = new Date().toISOString();
+  await writeFile(HUMAN_MEMORY_INDEX, JSON.stringify(index, null, 2));
+  
+  // Also mirror to shared brain for swarm visibility
+  const sharedEntry = `\n---\n## HUMAN MEMORY ${fullEntry.ts}\n**Type:** ${entry.type} | **Source:** ${entry.source} | **Tags:** ${entry.tags.join(', ')}\n${entry.content}\n`;
+  await appendFile(SHARED_BRAIN, sharedEntry);
+  
+  return fullEntry;
+}
+
+/** Query human memory by type, tag, or time range. */
+export async function recallHuman(query: {
+  type?: HumanMemoryEntry['type'];
+  tags?: string[];
+  since?: string;
+  until?: string;
+  limit?: number;
+}): Promise<HumanMemoryEntry[]> {
+  await ensureHumanMemoryLog();
+  const log = await readFile(HUMAN_MEMORY_LOG, 'utf-8');
+  const lines = log.trim().split('\n').filter(l => l && !l.startsWith('#'));
+  
+  let entries: HumanMemoryEntry[] = lines.map(l => {
+    try { return JSON.parse(l); } catch { return null; }
+  }).filter((e): e is HumanMemoryEntry => e !== null);
+  
+  if (query.type) entries = entries.filter(e => e.type === query.type);
+  if (query.tags?.length) entries = entries.filter(e => query.tags!.some(t => e.tags.includes(t)));
+  if (query.since) entries = entries.filter(e => e.ts >= query.since!);
+  if (query.until) entries = entries.filter(e => e.ts <= query.until!);
+  
+  entries.sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+  if (query.limit) entries = entries.slice(0, query.limit);
+  
+  return entries;
+}
+
+/** Get human memory stats. */
+export async function humanMemoryStats() {
+  await ensureHumanMemoryLog();
+  const log = await readFile(HUMAN_MEMORY_LOG, 'utf-8');
+  const lines = log.trim().split('\n').filter(l => l && !l.startsWith('#'));
+  const entries = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  
+  const byType = entries.reduce((acc, e) => {
+    acc[e.type] = (acc[e.type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const bySource = entries.reduce((acc, e) => {
+    acc[e.source] = (acc[e.source] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  return {
+    totalEntries: entries.length,
+    byType,
+    bySource,
+    oldest: entries[entries.length - 1]?.ts,
+    newest: entries[0]?.ts,
+    logSize: log.length,
+  };
+}
+
 export async function appendToMemory(layerId: string, content: string): Promise<{ ok: boolean; path: string }> {
   const layerMap: Record<string, string> = {
     'shared-brain': SHARED_BRAIN,
@@ -87,11 +199,11 @@ export async function appendToMemory(layerId: string, content: string): Promise<
     'dreams': DREAMS_MD,
     'forensics': FORENSICS_MD,
     'agent-registry': AGENTS_MD,
+    'human-memory': HUMAN_MEMORY_LOG,
   };
   const target = layerMap[layerId];
   if (!target) throw new Error(`Unknown layer: ${layerId}`);
   
-  const { appendFile } = await import('node:fs/promises');
   const timestamp = new Date().toISOString();
   const entry = `\n---\n## ${timestamp}\n${content}\n`;
   await appendFile(target, entry);
@@ -118,5 +230,8 @@ export function getMemoryRoutes() {
     { id: 'append', path: '/api/masa/memory/append', method: 'POST', desc: 'Append to a writable layer' },
     { id: 'forensic', path: '/api/masa/memory/forensic', method: 'POST', desc: 'Write forensic note' },
     { id: 'stats', path: '/api/masa/memory/stats', method: 'GET', desc: 'Memory stats only' },
+    { id: 'human-remember', path: '/api/masa/memory/human/remember', method: 'POST', desc: 'Permanently remember human directive/observation' },
+    { id: 'human-recall', path: '/api/masa/memory/human/recall', method: 'GET', desc: 'Query human memory log' },
+    { id: 'human-stats', path: '/api/masa/memory/human/stats', method: 'GET', desc: 'Human memory statistics' },
   ];
 }
