@@ -3,11 +3,16 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, X, Globe, MapPinned, Route, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, ShoppingBag } from 'lucide-react';
+import { Layers, Cpu, Newspaper, Search, X, Globe, MapPinned, Route, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Activity, Database, Wifi, Play, Network, Crosshair, Bluetooth, Pentagon, Radio , PenLine, ShoppingBag, FolderOpen } from 'lucide-react';
 import { type TerrainStatus } from '@/lib/map-terrain';
 import { loadCameraCatalog, loadNearbyCameras, mergeCameraCatalog } from '@/lib/camera-catalog';
 import IntelFeed from '@/components/IntelFeed';
-import MarketsPanel from '@/components/MarketsPanel';
+import LaneDesk from '@/components/LaneDesk';
+import FileRail from '@/components/FileRail';
+import GroundedDock from '@/components/GroundedDock';
+import AtlasWalker from '@/components/AtlasWalker';
+import PlanetStroll from '@/components/PlanetStroll';
+import Watchdogs from '@/components/Watchdogs';
 import ScmPanel from '@/components/ScmPanel';
 import SearchBar from '@/components/SearchBar';
 import DirectionsBar, { type RouteResult, type LiveLocation } from '@/components/DirectionsBar';
@@ -19,11 +24,7 @@ import ScaleBar from '@/components/ScaleBar';
 import LocalWeatherHud from '@/components/LocalWeatherHud';
 import type { LocalWeather } from '@/lib/local-weather';
 import PortalDropdown from '@/components/PortalDropdown';
-import PlanetRail from '@/components/PlanetRail';
-import HiddenPlanetStage from '@/components/HiddenPlanetStage';
-import IosHomeBanner from '@/components/IosHomeBanner';
-import { nextPlanet, type PlanetId } from '@/lib/planets';
-import type { OperatorSite } from '@/lib/operator-sites';
+import { type OperatorSite } from '@/lib/operator-sites';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { applySettings, loadSavedSettings } from '@/lib/style-tokens';
 import SharePanel from '@/components/SharePanel';
@@ -33,7 +34,8 @@ import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 import WorldRemote from '@/components/WorldRemote';
 import ArcGISPanel from '@/components/ArcGISPanel';
-const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
+import HomeApplets from '@/components/HomeApplets';
+const MasaMap = dynamic(() => import('@/components/MasaMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
 const CameraViewer = dynamic(() => import('@/components/CameraViewer'));
@@ -144,6 +146,8 @@ function ViewSegment({ active, onClick, title, icon: Icon, label, layoutId }: {
 }
 
 export default function Dashboard() {
+  const isMobile = useIsMobile();
+
   const dataRef = useRef<any>({});
   const [dataVersion, setDataVersion] = useState(0);
   const data = dataRef.current;
@@ -157,7 +161,11 @@ export default function Dashboard() {
   const [locationLabel, setLocationLabel] = useState('');
   const [regionDossier, setRegionDossier] = useState<any>(null);
   const [dossierLoading, setDossierLoading] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
+  const [placementCoords, setPlacementCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [placementName, setPlacementName] = useState('');
+  const [placementKind, setPlacementKind] = useState('PORTAL');
+  const [placements, setPlacements] = useState<Array<{ id: string; name: string; kind: string; lat: number; lng: number; label?: string }>>([]);
+  const [showSplash, setShowSplash] = useState(false);
   const autoLocateCancelled = useRef(false);
 
   const [activeCamera, setActiveCamera] = useState<any>(null);
@@ -202,7 +210,7 @@ export default function Dashboard() {
 
   // The popup lives in raw map HTML, so it hands aircraft over through a global.
   useEffect(() => {
-    (window as unknown as { osirisWatchFlight?: (f: WatchedFlight) => void }).osirisWatchFlight = (f) => {
+    (window as unknown as { masaWatchFlight?: (f: WatchedFlight) => void }).masaWatchFlight = (f) => {
       if (!f?.icao24) return;
       setWatchedFlights((prev) =>
         prev.some((w) => w.icao24 === f.icao24) ? prev : [...prev, f].slice(-6));
@@ -270,7 +278,6 @@ export default function Dashboard() {
      and nearby CCTV travel with the operator under Tailscale. */
   useEffect(() => {
     if (navSession) return; // nav watch already owns the stream
-    if (!isMobile) return;
     if (typeof navigator === 'undefined' || !navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
       (pos) => {
@@ -283,19 +290,29 @@ export default function Dashboard() {
           accuracy: pos.coords.accuracy,
           heading: pos.coords.heading,
         });
-        setHomeFix(prev => ({ lat, lng, city: prev?.city }));
+        setHomeFix(prev => {
+          if (prev && Math.abs(prev.lat - lat) < 0.002 && Math.abs(prev.lng - lng) < 0.002) return prev;
+          return { lat, lng, city: prev?.city };
+        });
       },
       () => { /* Safari needs HTTPS + Allow; Tailscale URL covers HTTPS */ },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [isMobile, navSession]);
+  }, [navSession]);
   const [showRemote, setShowRemote] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [showStreet, setShowStreet] = useState(false);
   const [showArcGIS, setShowArcGIS] = useState(false);
   const [arcgisLayers, setArcgisLayers] = useState<Array<{ id: string; title: string; url: string; geojson: any; color: string; visible: boolean; opacity: number }>>([]);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; bounds?: { west: number; south: number; east: number; north: number } } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<'layers'|'markets'|'intel'|'search'|'recon'|'remote'|'horus'|null>(null);
+  useEffect(() => {
+    const open = () => { setShowUnified(true); setMobilePanel('horus'); };
+    window.addEventListener('masa:open-command-group', open);
+    return () => window.removeEventListener('masa:open-command-group', open);
+  }, []);
   const [mapProjection, setMapProjection] = useState<'globe'|'mercator'>('globe');
   const [terrainFocus, setTerrainFocus] = useState(0);
   const [terrainStatus, setTerrainStatus] = useState<TerrainStatus>('idle');
@@ -303,16 +320,16 @@ export default function Dashboard() {
   const [mapStyle, setMapStyle] = useState<'dark'|'satellite'>('satellite');
   const [homeFix, setHomeFix] = useState<{ lat: number; lng: number; city?: string } | null>(null);
   const [localWeather, setLocalWeather] = useState<LocalWeather | null>(null);
-  const [planet, setPlanet] = useState<PlanetId>('earth');
+  const [nasaWeather, setNasaWeather] = useState<{ hour: string; temperatureC: number | null; humidity: number | null; windMs: number | null; precipitationMm: number | null; clouds: number | null } | null>(null);
   const [sweepData, setSweepData] = useState<any>(null);
   const [scanTargets, setScanTargets] = useState<any[]>([]);
   const [drawnPolygons, setDrawnPolygons] = useState<DrawnShape[]>([]);
   const [demoMode, setDemoMode] = useState(false);
-  const [osirisTheme, setOsirisTheme] = useState<'core'|'ghost'>('core');
+  const [masaTheme, setMasaTheme] = useState<'core'|'ghost'>('core');
 
   useEffect(() => {
-    document.body.className = osirisTheme === 'core' ? '' : `theme-${osirisTheme}`;
-  }, [osirisTheme]);
+    document.body.className = masaTheme === 'core' ? '' : `theme-${masaTheme}`;
+  }, [masaTheme]);
 
   /* Style Studio overrides are inline on <body>, so they survive the theme
      swap above and only need reapplying once per load. */
@@ -321,7 +338,6 @@ export default function Dashboard() {
     if (saved) applySettings(saved);
   }, []);
 
-  const isMobile = useIsMobile();
   const startTime = useRef(Date.now());
   const geocodeCache = useRef<Map<string, string>>(new Map());
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -464,6 +480,10 @@ export default function Dashboard() {
         .then(r => (r.ok ? r.json() : null))
         .then(w => { if (!cancelled && w && w.condition) setLocalWeather(w); })
         .catch(() => { /* HUD stays on last good reading */ });
+      fetch(`/api/nasa/weather?lat=${homeFix.lat}&lng=${homeFix.lng}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(w => { if (!cancelled && w && w.source === 'NASA POWER') setNasaWeather(w); })
+        .catch(() => { /* NASA line stays on the last hour */ });
     };
     load();
     const iv = setInterval(load, 5 * 60 * 1000);
@@ -504,23 +524,34 @@ export default function Dashboard() {
       if (e.key === 'm') setShowMarkets(p => !p);
       if (e.key === 'c') setShowScmPanel(p => !p);
       if (e.key === 'i') setShowIntel(p => !p);
-      if (e.key === 's') { setShowDesktopSearch(p => !p); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false); }
+      if (e.key === 's') { 
+        setShowDesktopSearch(p => !p); 
+        setShowIntel(false); 
+        setShowMarkets(false); 
+        setShowAlerts(false); 
+        setShowSpaceCam(false); 
+      }
       if (e.key === 'r' && !e.ctrlKey && !e.metaKey) setFlyToLocation({ lat: 20, lng: 0, zoom: 2.5, ts: Date.now() });
       if (e.key === 'g') {
         setActiveLayers(prev => ({ ...prev, terrain_elevation: false, terrain_3d: false }));
         setMapProjection(p => p === 'globe' ? 'mercator' : 'globe');
       }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); setPlanet(p => nextPlanet(p, -1)); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); setPlanet(p => nextPlanet(p, 1)); }
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
-        setShowDesktopSearch(true); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false);
+        setShowDesktopSearch(true); 
+        setShowIntel(false); 
+        setShowMarkets(false); 
+        setShowAlerts(false); 
+        setShowSpaceCam(false);
       }
     };
     const fsHandler = () => setIsFullscreen(!!document.fullscreenElement);
     window.addEventListener('keydown', handler);
     document.addEventListener('fullscreenchange', fsHandler);
-    return () => { window.removeEventListener('keydown', handler); document.removeEventListener('fullscreenchange', fsHandler); };
+    return () => { 
+      window.removeEventListener('keydown', handler); 
+      document.removeEventListener('fullscreenchange', fsHandler); 
+    };
   }, []);
 
   // Mouse coords + reverse geocode (Zero-Render)
@@ -548,18 +579,43 @@ export default function Dashboard() {
           setLocationLabel(label);
           lastGeocodedPos.current = coords;
         }
-      } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
+      } catch (e) { console.warn('[MASA] Suppressed error:', e instanceof Error ? e.message : e); }
     }, 3000); // 3s debounce (was 1.5s)
   }, []);
 
   // Region dossier (right-click)
   const handleRightClick = useCallback(async (coords: { lat: number; lng: number }) => {
+    setPlacementCoords(coords);
     setDossierLoading(true); setRegionDossier(null);
     try {
       const res = await fetch(`/api/region-dossier?lat=${coords.lat}&lng=${coords.lng}`);
       if (res.ok) setRegionDossier(await res.json());
-    } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); } finally { setDossierLoading(false); }
+    } catch (e) { console.warn('[MASA] Suppressed error:', e instanceof Error ? e.message : e); } finally { setDossierLoading(false); }
   }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('masa-local-placements');
+      if (saved) setPlacements(JSON.parse(saved));
+    } catch { /* local-only registry is optional */ }
+  }, []);
+
+  const savePlacement = useCallback(() => {
+    if (!placementCoords || !placementName.trim()) return;
+    const item = {
+      id: `placement-${Date.now()}`,
+      name: placementName.trim(),
+      kind: placementKind,
+      lat: placementCoords.lat,
+      lng: placementCoords.lng,
+      label: locationLabel || undefined,
+    };
+    const next = [...placements, item];
+    setPlacements(next);
+    localStorage.setItem('masa-local-placements', JSON.stringify(next));
+    setPlacementName('');
+    setPlacementCoords(null);
+  }, [locationLabel, placementCoords, placementKind, placementName, placements]);
   // Entity click handler (hoisted from JSX to comply with Rules of Hooks - Fixes #113)
   const handleEntityClick = useCallback((entity: any) => {
     if (entity?.type === 'cctv') setActiveCamera(entity);
@@ -571,7 +627,7 @@ export default function Dashboard() {
   }, []);
 
   // ── Drawing / AOI ──
-  // OsirisMap already owns the draw interaction and the polygon rendering;
+  // MasaMap already owns the draw interaction and the polygon rendering;
   // this only turns a finished ring into a measured, named, coloured record.
   // Restore drawn areas on load. Work that vanishes on refresh is work the
   // operator will not trust the tool with.
@@ -632,7 +688,7 @@ export default function Dashboard() {
 
   const handleExportGeoJSON = useCallback(() => {
     downloadFile(
-      `osiris-aoi-${new Date().toISOString().slice(0, 10)}.geojson`,
+      `masa-aoi-${new Date().toISOString().slice(0, 10)}.geojson`,
       JSON.stringify(shapesToGeoJSON(drawnPolygons), null, 2),
       'application/geo+json',
     );
@@ -663,7 +719,7 @@ export default function Dashboard() {
       }
       return false;
     } catch (e) {
-      console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e);
+      console.warn('[MASA] Suppressed error:', e instanceof Error ? e.message : e);
       setBackendStatus('error');
       return false;
     }
@@ -676,35 +732,20 @@ export default function Dashboard() {
     const eqTransform = (data: any) => ({ earthquakes: (data.features || []).map((f: any) => ({ id: f.id, lat: f.geometry?.coordinates?.[1] || 0, lng: f.geometry?.coordinates?.[0] || 0, depth: f.geometry?.coordinates?.[2] || 0, magnitude: f.properties?.mag, place: f.properties?.place, time: f.properties?.time, url: f.properties?.url, tsunami: f.properties?.tsunami, type: f.properties?.type, felt: f.properties?.felt, alert: f.properties?.alert })) });
     fetchEndpoint(eqUrl, eqTransform);
     fetchEndpoint('/api/news');
-    /* A cold start can time out every upstream quote and return an all-empty
-       feed. Waiting a full poll interval to find out leaves the panel blank for
-       15 minutes, so retry a few times up-front until instruments actually land. */
-    const marketRetries: ReturnType<typeof setTimeout>[] = [];
-    const loadMarkets = async (attempt = 0) => {
-      await fetchEndpoint('/api/markets', d => ({ markets: d }));
-      if ((dataRef.current.markets?.count || 0) === 0 && attempt < 3) {
-        marketRetries.push(setTimeout(() => loadMarkets(attempt + 1), 15000));
-      }
-    };
-    const marketTimer = setTimeout(() => loadMarkets(), 800);
-
-    // Priority 2: Space Weather (needed for MarketsPanel)
+    // Priority 2: Space weather for the solar readout
     const spaceTimer = setTimeout(async () => {
       try {
         const r = await fetch('/api/space-weather');
         if (r.ok) setSpaceWeather(await r.json());
-      } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
+      } catch (e) { console.warn('[MASA] Suppressed error:', e instanceof Error ? e.message : e); }
     }, 5000);
 
     // Polling — OPTIMIZED intervals to minimize edge requests
     const intervals = [
       setInterval(() => fetchEndpoint(eqUrl, eqTransform, undefined, { skipWhenHidden: true }), 900000),  // 15 min (was 5)
       setInterval(() => fetchEndpoint('/api/news', undefined, undefined, { skipWhenHidden: true }), 1800000),        // 30 min (was 10)
-      setInterval(() => fetchEndpoint('/api/markets', d => ({ markets: d }), undefined, { skipWhenHidden: true }), 900000), // 15 min (was 5)
     ];
     return () => {
-      clearTimeout(marketTimer);
-      marketRetries.forEach(clearTimeout);
       clearTimeout(spaceTimer);
       intervals.forEach(clearInterval);
     };
@@ -721,7 +762,7 @@ export default function Dashboard() {
       };
       setDataVersion(value => value + 1);
       setBackendStatus('connected');
-    }, () => console.warn('[OSIRIS] Camera catalogue load failed; bounded retry scheduled'));
+    }, () => console.warn('[MASA] Camera catalogue load failed; bounded retry scheduled'));
   }, [activeLayers.cctv]);
 
   /* Real nearby: once we know where the operator is (GPS / home / map), pull
@@ -739,7 +780,7 @@ export default function Dashboard() {
         };
         setDataVersion(value => value + 1);
       },
-      () => console.warn('[OSIRIS] Nearby CCTV load failed'),
+      () => console.warn('[MASA] Nearby CCTV load failed'),
     );
   }, [activeLayers.cctv, liveLocation?.lat, liveLocation?.lng, homeFix?.lat, homeFix?.lng, mapCenter?.lat, mapCenter?.lng]);
 
@@ -799,7 +840,6 @@ export default function Dashboard() {
     }
     // Global Incidents (GDELT)
     if (activeLayers.global_incidents && !layerFetchedRef.current.has('gdelt')) {
-      fetchEndpoint('/api/gdelt', d => ({ gdelt: d.events }));
       layerFetchedRef.current.add('gdelt');
     }
 
@@ -818,7 +858,6 @@ export default function Dashboard() {
       })();
       layerFetchedRef.current.add('cables');
     }
-
 
     // Live Malware (abuse.ch) is pushed, not fetched — see the SSE subscription below.
 
@@ -841,7 +880,6 @@ export default function Dashboard() {
 
     // GDELT 2.0 geocoded events
     if ((activeLayers as any).gdelt_events) {
-      loadLayerOnce('gdelt_events', '/api/gdelt-events?limit=600', d => ({ gdelt_events: d.events }));
     }
 
     // Cloudflare Radar — one request backs both layers
@@ -851,7 +889,6 @@ export default function Dashboard() {
         cf_attack_origins: d.attack_origins ?? [],
       }));
     }
-
 
   }, [activeLayers]);
 
@@ -951,7 +988,7 @@ export default function Dashboard() {
 
   // Reactive layer fetch: handled by layerFetchedRef above (no duplicate)
 
-  // ── OSIRIS SDK — Intelligence Fusion Layer ──
+  // ── MASA SDK — Intelligence Fusion Layer ──
   // Produces node coordinates for the SDK network mesh visualization.
   // Does NOT duplicate existing layer visuals — SDK layer is LINES ONLY.
   // Cameras are excluded — they have their own dedicated layer.
@@ -1034,7 +1071,6 @@ export default function Dashboard() {
     (data.commercial_flights?.length||0)+(data.private_flights?.length||0)+(data.private_jets?.length||0)+(data.military_flights?.length||0)
   ), [data.commercial_flights, data.private_flights, data.private_jets, data.military_flights]);
 
-
   return (
     <main className="fixed inset-0 w-full h-full bg-[var(--bg-void)] overflow-hidden">
 
@@ -1063,8 +1099,6 @@ export default function Dashboard() {
             >
               V4.2
             </motion.div>
-
-
 
             {/* ── Geometric tactical logo ── */}
             <div className="relative w-40 h-40 mb-8 flex items-center justify-center z-[2]">
@@ -1132,7 +1166,7 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* ── OSIRIS title — letter-by-letter stagger ── */}
+            {/* ── MASA title — letter-by-letter stagger ── */}
             <div className="flex items-center gap-[2px] mb-3 z-[2]">
               {'MASA IA'.split('').map((letter, i) => (
                 <motion.span
@@ -1157,7 +1191,7 @@ export default function Dashboard() {
                 className="overflow-hidden whitespace-nowrap"
               >
                 <p className="text-[11px] md:text-[10px] font-mono tracking-[0.5em] text-[var(--gold-primary)]" style={{ opacity: 0.8 }}>
-                  GLOBAL INTELLIGENCE PLATFORM
+                  MASA INTELLIGENCE OPSEC
                 </p>
               </motion.div>
             </div>
@@ -1222,40 +1256,76 @@ export default function Dashboard() {
               />
             ))}
 
-
-
             {/* ── Inline keyframe for scanline drift ── */}
 
           </motion.div>
         )}
       </AnimatePresence>
 
-
-
       <div className="masa-frame" aria-hidden>
         <span className="masa-frame-mark">MASA IA</span>
         <span className="masa-frame-bl" />
         <span className="masa-frame-br" />
       </div>
-      {/* ── MAP / HIDDEN PLANETS ── */}
+      <div className="pointer-events-none absolute bottom-[76px] left-1/2 z-[220] -translate-x-1/2 md:bottom-[100px]">
+        <HomeApplets
+          applets={[
+            {
+              id: 'layers',
+              label: 'LAYERS',
+              hint: 'Open map layers',
+              icon: Layers,
+              color: 'var(--cyan-primary)',
+              onClick: () => setShowLayers(value => !value),
+            },
+            {
+              id: 'intel',
+              label: 'INTEL',
+              hint: 'Open OSINT intelligence',
+              icon: Radar,
+              color: 'var(--cyan-primary)',
+              onClick: () => { setShowIntel(value => !value); setShowMarkets(false); setShowUnified(false); },
+            },
+            {
+              id: 'lane',
+              label: 'LANE',
+              hint: 'Agents, models, providers, MCP, logins',
+              icon: Cpu,
+              color: '#39FF14',
+              onClick: () => { setShowMarkets(value => !value); setShowIntel(false); setShowUnified(false); },
+            },
+            {
+              id: 'unified',
+              label: 'DESK',
+              hint: 'Open the unified MASA desk',
+              icon: Network,
+              color: 'var(--gold-primary)',
+              onClick: () => { setShowUnified(value => !value); setShowIntel(false); setShowMarkets(false); },
+            },
+            {
+              id: 'search',
+              label: 'SEARCH',
+              hint: 'Search the map',
+              icon: Search,
+              color: 'var(--text-primary)',
+              onClick: () => setShowDesktopSearch(value => !value),
+            },
+            {
+              id: 'route',
+              label: 'ROUTE',
+              hint: 'Plan a route',
+              icon: Route,
+              color: 'var(--gold-primary)',
+              onClick: () => setShowDirections(value => !value),
+            },
+          ]}
+        />
+      </div>
+      {/* ── MAP ── */}
       <ErrorBoundary name="Map">
-        <AnimatePresence mode="wait">
-          {planet !== 'earth' ? (
-            <motion.div
-              key={planet}
-              className="absolute inset-0 z-[1]"
-              initial={{ x: 80, opacity: 0, scale: 0.92 }}
-              animate={{ x: 0, opacity: 1, scale: 1 }}
-              exit={{ x: -80, opacity: 0, scale: 0.92 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-            >
-              <HiddenPlanetStage planetId={planet} />
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-        <div className={planet === 'earth' ? 'contents' : 'hidden'}>
-        <OsirisMap 
-          key={osirisTheme}
+        <div className="contents">
+        <MasaMap 
+          key={masaTheme}
           data={data} 
           activeLayers={activeLayers} 
           projection={mapProjection === 'mercator' ? 'mercator' : 'globe'}
@@ -1272,7 +1342,7 @@ export default function Dashboard() {
           sweepData={sweepData}
           scanTargets={scanTargets}
           demoMode={demoMode}
-          theme={osirisTheme}
+          theme={masaTheme}
           arcgisLayers={arcgisLayers.filter(l => l.visible).map(l => ({ id: l.id, title: l.title, geojson: l.geojson, color: l.color, opacity: l.opacity }))}
           onMapCenter={setMapCenter}
           route={activeRoute}
@@ -1293,6 +1363,7 @@ export default function Dashboard() {
           drawnPolygons={drawnPolygons}
           aircraftAirports={aircraftAirports}
         />
+        <AtlasWalker zoom={mapView.zoom} />
         </div>
       </ErrorBoundary>
 
@@ -1357,7 +1428,6 @@ export default function Dashboard() {
         )}
       </div>
 
-
       {/* ── FLIGHT WATCH ── */}
       {watchedFlights.length > 0 && (
         <motion.div
@@ -1383,6 +1453,10 @@ export default function Dashboard() {
         style={{ left: isMobile ? '12px' : '120px' }}
       >
         {/* Unified Control Strip */}
+        <PlanetStroll onVisit={(index) => {
+          setMapProjection('globe');
+          setFlyToLocation({ lat: 0, lng: index * 45 - 90, zoom: 0, ts: Date.now() });
+        }} />
         <div className="flex items-center gap-[3px] p-[3px] pointer-events-auto rounded-xl border border-[var(--border-primary)] bg-[var(--bg-panel)] backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.55)]">
           <ViewSegment layoutId="view-projection" active={mapProjection === 'globe'} onClick={() => setMapProjection('globe')} title="3D Globe" icon={Globe} label="3D" />
           <ViewSegment layoutId="view-projection" active={mapProjection === 'mercator'} onClick={selectFlatMap} title="2D Map" icon={MapPinned} label="2D" />
@@ -1391,17 +1465,19 @@ export default function Dashboard() {
           <ViewSegment layoutId="view-style" active={mapStyle === 'satellite'} onClick={() => setMapStyle('satellite')} title="Satellite View" icon={Satellite} label="SAT" />
         </div>
 
-
-        <PlanetRail planet={planet} onPlanet={setPlanet} />
-        {planet === 'earth' && (
-          <PortalDropdown onPortal={(site: OperatorSite) => {
-            setPlanet('earth');
+        <PortalDropdown onPortal={(site: OperatorSite) => {
             setFlyToLocation({ lat: site.lat, lng: site.lng, zoom: 11, ts: Date.now() });
           }} />
-        )}
-        {localWeather && planet === 'earth' && (
+        <GroundedDock
+          fix={liveLocation ?? homeFix}
+          events={data.weather_events || []}
+          streetOpen={showStreet}
+          onStreet={() => setShowStreet(open => !open)}
+          onFly={(lat, lng) => setFlyToLocation({ lat, lng, zoom: 8, ts: Date.now() })}
+        />
+        {localWeather && (
           <div className="pointer-events-none">
-            <LocalWeatherHud weather={localWeather} city={homeFix?.city} />
+            <LocalWeatherHud weather={localWeather} city={homeFix?.city} nasa={nasaWeather} />
           </div>
         )}
 
@@ -1423,7 +1499,7 @@ export default function Dashboard() {
           </svg>
           <div className="flex flex-col items-start gap-0.5">
             <h1 className="text-lg md:text-xl font-bold tracking-[0.4em] text-[#D4AF37] font-mono">MASA IA</h1>
-            <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]">OPEN SOURCE INTELLIGENCE</span>
+            <span className="text-[9px] md:text-[10px] font-mono tracking-[0.2em] opacity-80 uppercase text-[#D4AF37]">RAW INTELLIGENCE · OPSEC COMMAND</span>
           </div>
           <div className="pointer-events-auto ml-2">
             <ThemeSong />
@@ -1431,11 +1507,10 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-3 mt-1.5 pl-[44px] min-w-0 pr-4">
           <span className="text-[9px] md:text-[9px] text-[var(--text-muted)] font-mono tracking-[0.2em] md:tracking-[0.3em] uppercase opacity-40 truncate">
-            REAL-TIME GLOBAL MONITORING <span className="hidden md:inline">· FLIGHTS · MARITIME · SATELLITES · CCTV · WEATHER · CYBER THREATS</span>
+            REAL-TIME MASA INTELLIGENCE <span className="hidden md:inline">· FLIGHTS · MARITIME · SATELLITES · CCTV · WEATHER · CYBER THREATS · OPSEC</span>
           </span>
         </div>
       </motion.div>
-
 
       {/* ── TOP-RIGHT STATUS (desktop) ── */}
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3 }} className="status-bar-desktop absolute top-4 right-6 z-[200] pointer-events-none flex items-center gap-3 text-[10px] font-mono tracking-widest text-[var(--text-muted)]">
@@ -1444,6 +1519,7 @@ export default function Dashboard() {
           <ZuluClock />
         </span>
 
+        <Watchdogs />
         <span className="flex items-center gap-1" title="Backend connection status">STATUS: <span className={backendStatus === 'connected' ? 'text-[var(--alert-green)]' : 'text-[var(--alert-red)]'}>{backendStatus === 'connected' ? 'LIVE' : backendStatus.toUpperCase()}</span></span>
 
         <span className="hidden lg:inline-flex items-center gap-1" title="Number of active data layers">
@@ -1463,11 +1539,11 @@ export default function Dashboard() {
         <TokenPanel />
 
         <a href='https://ko-fi.com/M8D41ZYW4Z' target='_blank' rel='noopener noreferrer' className="pointer-events-auto glass-panel px-3 py-1.5 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--gold-primary)]/40 bg-[var(--gold-primary)]/10 ml-3 shadow-[0_0_10px_rgba(255,215,0,0.1)]">
-          <div className="w-1.5 h-1.5 rounded-full bg-[var(--gold-primary)] animate-osiris-pulse" />
+          <div className="w-1.5 h-1.5 rounded-full bg-[var(--gold-primary)] animate-masa-pulse" />
           <span className="text-[var(--gold-primary)] font-bold">SUPPORT</span>
         </a>
 
-        <a href='https://shop.osirisai.live/' target='_blank' rel='noopener noreferrer' className="pointer-events-auto glass-panel px-3 py-1.5 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--cyan-primary)]/40 bg-[var(--cyan-primary)]/10 ml-3 shadow-[0_0_10px_rgba(0,229,255,0.1)]">
+        <a href='https://shop.masaia.live/' target='_blank' rel='noopener noreferrer' className="pointer-events-auto glass-panel px-3 py-1.5 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--cyan-primary)]/40 bg-[var(--cyan-primary)]/10 ml-3 shadow-[0_0_10px_rgba(0,229,255,0.1)]">
           <ShoppingBag className="w-3 h-3 text-[var(--cyan-primary)]" />
           <span className="text-[var(--cyan-primary)] font-bold">MERCH</span>
         </a>
@@ -1481,25 +1557,21 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             <TokenPanel />
             <a href='https://ko-fi.com/M8D41ZYW4Z' target='_blank' rel='noopener noreferrer' className="glass-panel px-2 py-1 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--gold-primary)]/40 bg-[var(--gold-primary)]/10">
-              <div className="w-1 h-1 rounded-full bg-[var(--gold-primary)] animate-osiris-pulse" />
+              <div className="w-1 h-1 rounded-full bg-[var(--gold-primary)] animate-masa-pulse" />
               <span className="text-[var(--gold-primary)] font-bold">SUPPORT</span>
             </a>
           </div>
-          {/* A third pill on this row pushes $OSIRIS under the wordmark on a
+          {/* A third pill on this row pushes $MASA under the wordmark on a
               375px phone, so the shop link takes a line of its own. */}
-          <a href='https://shop.osirisai.live/' target='_blank' rel='noopener noreferrer' className="glass-panel px-2 py-1 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--cyan-primary)]/40 bg-[var(--cyan-primary)]/10">
+          <a href='https://shop.masaia.live/' target='_blank' rel='noopener noreferrer' className="glass-panel px-2 py-1 flex items-center gap-1.5 text-[9px] font-mono tracking-widest hover:opacity-80 transition-opacity border-[var(--cyan-primary)]/40 bg-[var(--cyan-primary)]/10">
             <ShoppingBag className="w-2.5 h-2.5 text-[var(--cyan-primary)]" />
             <span className="text-[var(--cyan-primary)] font-bold">MERCH</span>
           </a>
         </motion.div>
       )}
 
-
-
       {/* ── NEW SIDEBAR (Root Level) ── */}
-      {showLayers && !isMobile && <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} />}
-
-
+      {showLayers && !isMobile && <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} theme={masaTheme} setTheme={setMasaTheme} capabilities={capabilities} />}
 
       {/* ── RIGHT TOOL STRIP (desktop only — mobile uses bottom nav) ── */}
       {!isMobile && <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-[250] pointer-events-auto bg-black/40 backdrop-blur-sm p-1 rounded-full border border-white/5">
@@ -1511,7 +1583,7 @@ export default function Dashboard() {
           <AnimatePresence>
             {showUnified && (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2">
-                <UnifiedDesk planet={planet} />
+                <UnifiedDesk />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1563,8 +1635,8 @@ export default function Dashboard() {
         </div>
 
         <div className="relative group">
-          <button onClick={() => { setShowMarkets(!showMarkets); setShowIntel(false); setShowAlerts(false); setShowSpaceCam(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showMarkets ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Markets — crypto prices, space weather, global indices" aria-label="Markets" aria-expanded={showMarkets}>
-            <BarChart3 className={`w-4 h-4 ${showMarkets ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          <button onClick={() => { setShowMarkets(!showMarkets); setShowIntel(false); setShowAlerts(false); setShowSpaceCam(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showMarkets ? 'bg-[#39FF14]/20' : 'hover:bg-white/10'}`} title="Lane — agents, models, providers, MCP, real logins" aria-label="Lane" aria-expanded={showMarkets}>
+            <Cpu className={`w-4 h-4 ${showMarkets ? 'text-[#39FF14]' : 'text-white/60'}`} />
             {showMarkets && (
               <span
                 aria-hidden="true"
@@ -1572,11 +1644,11 @@ export default function Dashboard() {
               />
             )}
           </button>
-          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">MARKETS</span>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">LANE</span>
           <AnimatePresence>
             {showMarkets && (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-80">
-                <MarketsPanel data={data} spaceWeather={spaceWeather} />
+                <LaneDesk />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1681,13 +1753,27 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
-
         {/* Separator */}
         <div className="w-4 h-px bg-white/10 mx-auto" />
 
+        {/* ── FILES ── */}
+        <div className="relative group">
+          <button onClick={() => { setShowFiles(!showFiles); setShowRemote(false); setShowArcGIS(false); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false); setShowDrawing(false); setShowDesktopSearch(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showFiles ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Your files on the globe" aria-label="Files" aria-expanded={showFiles}>
+            <FolderOpen className={`w-4 h-4 ${showFiles ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">FILES</span>
+          <AnimatePresence>
+            {showFiles && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-80">
+                <FileRail onLocate={(lat, lng) => { setActiveLayers(prev => ({ ...prev, operator_sites: true })); setFlyToLocation({ lat, lng, zoom: 8, ts: Date.now() }); }} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         {/* ── WORLD REMOTE ── */}
         <div className="relative group">
-          <button onClick={() => { setShowRemote(!showRemote); setShowArcGIS(false); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false); setShowDrawing(false); setShowDesktopSearch(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showRemote ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`} title="World Remote — control nearby Bluetooth devices (TVs, speakers, AC)" aria-label="World Remote" aria-expanded={showRemote}>
+          <button onClick={() => { setShowRemote(!showRemote); setShowFiles(false); setShowArcGIS(false); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); setShowSpaceCam(false); setShowDrawing(false); setShowDesktopSearch(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showRemote ? 'bg-[var(--cyan-primary)]/20' : 'hover:bg-white/10'}`} title="World Remote — control nearby Bluetooth devices (TVs, speakers, AC)" aria-label="World Remote" aria-expanded={showRemote}>
             <Bluetooth className={`w-4 h-4 ${showRemote ? 'text-[var(--cyan-primary)]' : 'text-white/60'}`} />
             {showRemote && (
               <span
@@ -1714,7 +1800,6 @@ export default function Dashboard() {
           </AnimatePresence>
         </div>
 
-
       </div>}
 
       {/* ── LIVE FEED VIEWER OVERLAY ── */}
@@ -1736,7 +1821,7 @@ export default function Dashboard() {
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-2.5 bg-[#111] border-b border-[var(--border-primary)]">
                 <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#FF4081] animate-osiris-pulse" />
+                  <div className="w-2 h-2 rounded-full bg-[#FF4081] animate-masa-pulse" />
                   <span className="text-[11px] font-mono font-bold text-white tracking-wider">{liveFeedName}</span>
                   <span className="px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-mono text-[10px] font-bold">LIVE STREAM</span>
                   {!liveFeedEmbedAllowed && (
@@ -1814,7 +1899,7 @@ export default function Dashboard() {
             <div className="glass-panel mobile-nav-inner">
               {[
                 { id: 'layers' as const, icon: Layers, label: 'LAYERS' },
-                { id: 'markets' as const, icon: BarChart3, label: 'MARKETS' },
+                { id: 'markets' as const, icon: Cpu, label: 'LANE' },
                 { id: 'intel' as const, icon: Newspaper, label: 'INTEL' },
                 { id: 'recon' as const, icon: Radar, label: 'RECON' },
                 { id: 'search' as const, icon: Search, label: 'SEARCH' },
@@ -1874,7 +1959,7 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[10px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'MASA RECON' : mobilePanel === 'horus' ? 'MASA IA LIVE' : mobilePanel === 'remote' ? 'WORLD REMOTE' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'LANE' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'MASA RECON' : mobilePanel === 'horus' ? 'MASA IA LIVE' : mobilePanel === 'remote' ? 'WORLD REMOTE' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
@@ -1889,13 +1974,13 @@ export default function Dashboard() {
                           <div><div className="hud-label" style={{fontSize:'9px'}}>NUC</div><div className="hud-value text-[10px]" style={{color:'var(--accent-nuclear)'}}>{(data.infrastructure?.length||0)}</div></div>
                         </div>
                       </div>
-                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={osirisTheme} setTheme={setOsirisTheme} capabilities={capabilities} />
+                      <LayerPanel {...terrainPanelProps} data={data} activeLayers={activeLayers} setActiveLayers={setActiveLayers} isMobile={true} theme={masaTheme} setTheme={setMasaTheme} capabilities={capabilities} />
                       <div className="mt-8">
                         <ViewPresets onNavigate={(lat, lng, zoom) => { setFlyToLocation({ lat, lng, zoom, ts: Date.now() }); setMobilePanel(null); }} />
                       </div>
                     </>
                   )}
-                  {mobilePanel === 'markets' && <MarketsPanel data={data} spaceWeather={spaceWeather} />}
+                  {mobilePanel === 'markets' && <LaneDesk />}
                   {mobilePanel === 'intel' && <IntelFeed data={data} onLocate={(lat, lng) => { setFlyToLocation({ lat, lng, ts: Date.now() }); setMobilePanel(null); }} />}
                   {mobilePanel === 'search' && (
                     <div className="space-y-2">
@@ -1910,7 +1995,7 @@ export default function Dashboard() {
                   )}
                   {mobilePanel === 'horus' && (
                     <div className="space-y-2">
-                      <UnifiedDesk planet={planet} />
+                      <UnifiedDesk />
                     </div>
                   )}
                   {mobilePanel === 'remote' && (
@@ -1956,7 +2041,7 @@ export default function Dashboard() {
       {/* ── Region Dossier ── */}
       {(regionDossier || dossierLoading) && (
         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="absolute top-16 md:top-20 left-2 right-2 md:left-1/2 md:right-auto md:-translate-x-1/2 z-[300] md:w-[480px] max-h-[65vh] overflow-y-auto styled-scrollbar">
-          <div className="glass-panel p-5 osiris-glow">
+          <div className="glass-panel p-5 masa-glow">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-mono font-bold text-[var(--gold-primary)] tracking-wider">REGION DOSSIER</h2>
               <button onClick={() => { setRegionDossier(null); setDossierLoading(false); }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xs">✕</button>
@@ -1977,6 +2062,23 @@ export default function Dashboard() {
                     <div><div className="hud-label mb-0.5">REGION</div><div className="text-xs text-[var(--text-primary)]">{regionDossier.country.subregion || regionDossier.country.region}</div></div>
                     <div><div className="hud-label mb-0.5">LANGUAGES</div><div className="text-xs text-[var(--text-primary)]">{regionDossier.country.languages?.join(', ')}</div></div>
                     <div><div className="hud-label mb-0.5">AREA</div><div className="text-xs text-[var(--text-primary)]">{regionDossier.country.area?.toLocaleString()} km²</div></div>
+                  </div>
+                )}
+                {placementCoords && (
+                  <div className="absolute left-1/2 top-1/2 z-[500] w-[min(92vw,360px)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[var(--gold-primary)]/50 bg-black/90 p-4 shadow-[0_0_28px_rgba(212,175,55,0.2)] pointer-events-auto">
+                    <div className="text-[10px] tracking-[0.22em] text-[var(--gold-light)]">PLACE ON REAL MAP</div>
+                    <div className="mt-1 text-[9px] text-[var(--text-muted)]">
+                      {placementCoords.lat.toFixed(5)}, {placementCoords.lng.toFixed(5)}
+                    </div>
+                    <input value={placementName} onChange={e => setPlacementName(e.target.value)} placeholder="NAME / LOCATION" className="mt-3 w-full rounded border border-white/10 bg-black/50 px-2 py-2 text-[11px] font-mono" autoFocus />
+                    <select value={placementKind} onChange={e => setPlacementKind(e.target.value)} className="mt-2 w-full rounded border border-white/10 bg-black/50 px-2 py-2 text-[10px] font-mono">
+                      <option>PORTAL</option><option>HQ</option><option>BANK</option><option>STUDIO</option><option>SAFEHOUSE</option><option>NOTE</option>
+                    </select>
+                    <div className="mt-3 flex gap-2">
+                      <button type="button" onClick={savePlacement} className="flex-1 rounded bg-[var(--gold-primary)]/20 py-2 text-[10px] tracking-[0.16em] text-[var(--gold-light)]">SAVE LOCAL</button>
+                      <button type="button" onClick={() => setPlacementCoords(null)} className="rounded bg-white/5 px-3 py-2 text-[10px] text-[var(--text-muted)]">CANCEL</button>
+                    </div>
+                    <div className="mt-2 text-[8px] text-[var(--text-muted)]">Private browser-local registry. No private address is transmitted.</div>
                   </div>
                 )}
                 {regionDossier.head_of_state && (<div><div className="hud-label mb-0.5">HEAD OF STATE</div><div className="text-xs text-[var(--gold-primary)]">{regionDossier.head_of_state.name}</div><div className="text-[9px] text-[var(--text-muted)]">{regionDossier.head_of_state.position}</div></div>)}
@@ -2054,7 +2156,6 @@ export default function Dashboard() {
       <div className="desktop-only absolute bottom-[26px] right-5 z-[200] pointer-events-none text-[9px] font-mono text-[var(--text-muted)] opacity-50 tracking-widest" title="Press ? to see all keyboard shortcuts">
         Press <span className="text-[var(--gold-primary)] opacity-80">?</span> for shortcuts · <span className="text-[var(--gold-primary)] opacity-80">F</span> fullscreen · <span className="text-[var(--gold-primary)] opacity-80">R</span> reset view
       </div>
-
 
     </main>
   );
