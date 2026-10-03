@@ -1,6 +1,6 @@
 'use client';
 
-import { BarChart3, Layers3, Network, Radar, Route, Search, type LucideIcon } from 'lucide-react';
+import { BarChart3, Layers3, Network, Radar, Route, Search, Brain, type LucideIcon } from 'lucide-react';
 
 export type HomeApplet = {
   id: string;

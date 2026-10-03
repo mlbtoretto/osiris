@@ -41,6 +41,7 @@ const SpaceCam = dynamic(() => import('@/components/SpaceCam'), { ssr: false });
 const CameraViewer = dynamic(() => import('@/components/CameraViewer'));
 const OsintPanel = dynamic(() => import('@/components/OsintPanel'));
 const UnifiedDesk = dynamic(() => import('@/components/UnifiedDesk'), { ssr: false });
+const MemoryConsole = dynamic(() => import('@/components/MemoryConsole'), { ssr: false });
 const ThemeSong = dynamic(() => import('@/components/ThemeSong'), { ssr: false });
 const DrawingToolbar = dynamic(() => import('@/components/DrawingToolbar'), { ssr: false });
 const DrawHud = dynamic(() => import('@/components/DrawHud'), { ssr: false });
@@ -177,6 +178,7 @@ export default function Dashboard() {
   const [showScmPanel, setShowScmPanel] = useState(true);
   const [showIntel, setShowIntel] = useState(false);
   const [showUnified, setShowUnified] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const [showDrawing, setShowDrawing] = useState(false);
   const [drawMode, setDrawMode] = useState<DrawMode | null>(null);
   const [drawProgress, setDrawProgress] = useState<DrawProgress | null>(null);
@@ -1318,6 +1320,14 @@ export default function Dashboard() {
               color: 'var(--gold-primary)',
               onClick: () => setShowDirections(value => !value),
             },
+            {
+              id: 'memory',
+              label: 'MEMORY',
+              hint: 'Unified MASA memory console',
+              icon: Brain,
+              color: 'var(--gold-primary)',
+              onClick: () => setShowMemory(value => !value),
+            },
           ]}
         />
       </div>
@@ -1584,6 +1594,25 @@ export default function Dashboard() {
             {showUnified && (
               <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2">
                 <UnifiedDesk />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="relative group">
+          <button onClick={() => { setShowMemory(v => !v); setShowUnified(false); setShowIntel(false); setShowMarkets(false); setShowAlerts(false); }} className={`relative w-8 h-8 rounded-full flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${showMemory ? 'bg-[var(--gold-primary)]/20' : 'hover:bg-white/10'}`} title="Memory Console — Unified MASA memory" aria-label="Memory Console" aria-expanded={showMemory}>
+            <Brain className={`w-4 h-4 ${showMemory ? 'text-[var(--gold-primary)]' : 'text-white/60'}`} />
+            {showMemory && (
+              <span
+                aria-hidden="true"
+                className="absolute -right-1 top-1/2 -translate-y-1/2 h-4 w-[2px] rounded-full bg-current text-[var(--gold-primary)]"
+              />
+            )}
+          </button>
+          <span className="absolute right-11 top-1/2 -translate-y-1/2 px-2 py-1 text-[9px] font-mono tracking-wider text-white/80 bg-black/80 backdrop-blur-sm rounded whitespace-nowrap opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity pointer-events-none">MEMORY</span>
+          <AnimatePresence>
+            {showMemory && (
+              <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="absolute right-12 top-1/2 -translate-y-1/2 w-96 max-h-[80vh]">
+                <MemoryConsole />
               </motion.div>
             )}
           </AnimatePresence>
