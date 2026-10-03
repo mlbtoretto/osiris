@@ -142,7 +142,7 @@ export const NASA_HUMANOIDS: HumanoidPersona[] = [
     specs: {
       height: '~190 cm with legs deployed',
       weight: '~200 kg',
-      dof: 42 + 14 (legs) = 56 total',
+      dof: '42 + 14 (legs) = 56 total',
       compute: 'Upgraded PowerPC + radiation-hardened co-processors',
       power: 'ISS external power / battery EVA pack',
       endurance: 'EVA duration (6–8 hr) on battery',
