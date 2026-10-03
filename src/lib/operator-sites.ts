@@ -43,11 +43,6 @@ function pack(ids: string[]): OperatorFile[] {
 
 /** Every site. Archive vault holds literally ALL_FILES so nothing is orphaned. */
 export const OPERATOR_SITES: OperatorSite[] = [
-
-/** Reverse lookup: file.id -> site that owns it (first match). */
-export function siteForFile(fileId: string): OperatorSite | undefined {
-  return OPERATOR_SITES.find(site => site.files.some(f => f.id === fileId));
-}
   {
     id: 'corp-iraq',
     name: 'MASA IA CORP',
@@ -438,4 +433,9 @@ export function sitesToGeoJSON() {
       },
     })),
   };
+}
+
+/** Reverse lookup: file.id -> site that owns it (first match). */
+export function siteForFile(fileId: string): OperatorSite | undefined {
+  return OPERATOR_SITES.find(site => site.files.some(f => f.id === fileId));
 }
